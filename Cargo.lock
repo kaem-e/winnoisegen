@@ -85,6 +85,7 @@ dependencies = [
  "cpal",
  "iced",
  "image",
+ "itertools",
  "rand",
  "tray-icon",
 ]
