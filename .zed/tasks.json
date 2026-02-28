@@ -3,6 +3,27 @@
 // Example:
 [
 	{
+		"label": "Run Example File",
+		"command": "cargo run --example $ZED_STEM",
+		// Which shell to use when running a task inside the terminal.
+		// May take 3 values:
+		// 1. (default) Use the system's default terminal configuration in /etc/passwd
+		//      "shell": "system"
+		// 2. A program:
+		//      "shell": {
+		//        "program": "sh"
+		//      }
+		// 3. A program with arguments:
+		//     "shell": {
+		//         "with_arguments": {
+		//           "program": "/bin/bash",
+		//           "args": ["--login"]
+		//         }
+		//     }
+		"shell": { "program": "nu" },
+	},
+
+	{
 		"label": "Cargo Run",
 		"command": "cargo run",
 		//"args": [],
@@ -45,6 +66,6 @@
 		//     }
 		"shell": "system",
 		// Represents the tags for inline runnable indicators, or spawning multiple tasks at once.
-		"tags": []
-	}
+		"tags": [],
+	},
 ]

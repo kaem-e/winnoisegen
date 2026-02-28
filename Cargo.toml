@@ -8,14 +8,26 @@ version = "0.1.0"
 cpal = "0.17"
 anyhow = "1.0"
 rand = "0.10"
-# egui = "0.33"
-# egui-winit = "0.33"
-# egui-wgpu = "0.33"
-# wgpu = "28.0"
-winit = "0.30"
+winit = { version = "0.30", features = ["rwh_06"], default-features = false }
+
+egui = "0.33"
+egui-winit = { version = "0.33", default-features = false }
+egui-wgpu = { version = "0.33", features = ["winit"] }
+wgpu = { version = "27.0", features = ["dx12", "metal", "parking_lot", "std", "vulkan", "wgsl"], default-features = false }
+pollster = "0.4.0"
+env_logger = "0.11"
 
 # fair game as theyre brought in via needed deps
-# bitflags = "2.10.0"
-# parking_lot = "0.12.5"
-# smallvec = "1.15.1"
-# zerocopy = "0.8.34"
+# bitflags = "2.11"
+# bytemuck = "1.25"
+# cfg-if = "1.0"
+# hashbrown = "0.16"
+# indexmap = "2.13"
+log = "0.4"
+# num-traits = "0.2"
+# parking_lot = "0.12"
+# smallvec = "1.15"
+# smol_str = "0.2"
+# thiserror = "2.0"
+# unicode-segmentation = "1.12"
+# zerocopy = "0.8"
