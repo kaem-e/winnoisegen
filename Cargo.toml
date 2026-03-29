@@ -10,6 +10,9 @@ egui            = "0.34"
 egui-wgpu       = { version = "0.34", features = ["winit"] }
 egui-winit      = { version = "0.34", default-features = false }
 env_logger      = { version = "0.11", default-features = false }
+image           = { version = "0.25.10", default-features = false, features = [
+	"png"
+] }
 log             = "0.4"
 pollster        = { version = "0.4", features = ["macro"] }
 rand            = "0.10"
