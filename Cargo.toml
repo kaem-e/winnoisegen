@@ -9,11 +9,11 @@ cpal            = "0.17"
 egui            = "0.34"
 egui-wgpu       = { version = "0.34", features = ["winit"] }
 egui-winit      = { version = "0.34", default-features = false }
-env_logger      = { version = "0.11", default-features = false, features = [
-	"auto-color"
-] }
+env_logger      = { version = "0.11", default-features = false }
+log             = "0.4"
 pollster        = { version = "0.4", features = ["macro"] }
 rand            = "0.10"
+tray-icon       = "0.21"
 wgpu            = { version = "29", default-features = false, features = [
 	"parking_lot",
 	"std",
@@ -26,17 +26,16 @@ winit           = { version = "0.30", default-features = false, features = [
 ] }
 
 # fair game as they're brought in via needed deps
-bitflags             = "2"
-bytemuck             = "1"
-cfg-if               = "1"
-extfn                = "0.1"
-hashbrown            = "0.16"
-indexmap             = "2"
-log                  = "0.4"
-num-traits           = "0.2"
-parking_lot          = "0.12"
-smallvec             = "1"
-smol_str             = "0.2"
-thiserror            = "2"
-unicode-segmentation = "1"
-zerocopy             = "0.8"
+# bitflags             = "2"
+# bytemuck             = "1"
+# cfg-if               = "1"
+# extfn                = "0.1"
+# hashbrown            = "0.16"
+# indexmap             = "2"
+# num-traits           = "0.2"
+# parking_lot          = "0.12"
+# smallvec             = "1"
+# smol_str             = "0.2"
+# thiserror            = "2"
+# unicode-segmentation = "1"
+# zerocopy             = "0.8"

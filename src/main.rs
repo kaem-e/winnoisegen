@@ -1,18 +1,19 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
-#![feature(float_minimum_maximum, portable_simd)]
 #![allow(unused)]
+#![feature(float_minimum_maximum, portable_simd)]
 
+use anyhow;
 use cpal::{
 	self, Host, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use egui::{self, Context};
-use egui_wgpu;
-use egui_winit;
+use egui;
+use egui_wgpu::{self, Renderer, RendererOptions};
+use egui_winit::{self, State};
+use env_logger;
 use pollster::FutureExt as _;
 use std::sync::Arc;
 use winit::{
-	self,
 	application::ApplicationHandler,
 	dpi::LogicalSize,
 	event::{ElementState, KeyEvent, WindowEvent},
@@ -20,6 +21,8 @@ use winit::{
 	keyboard::{KeyCode, PhysicalKey},
 	window::{Window, WindowId},
 };
+use wgpu::{self, *};
+
 
 fn main() -> Result<(), anyhow::Error> {
 	env_logger::init();
@@ -63,8 +66,6 @@ fn main() -> Result<(), anyhow::Error> {
 
 	Ok(())
 }
-
-// ----------------------------- winit shit -----------------------------
 
 struct App {
 	cpal: (Stream, bool),
@@ -139,21 +140,6 @@ impl ApplicationHandler for App {
 			WindowEvent::Resized(s) => state.resize(s.width, s.height),
 
 			WindowEvent::RedrawRequested => {
-				// Redraw the application.
-				//
-				// It's preferable for applications that do not render continuously to render in
-				// this event rather than in AboutToWait, since rendering in here allows
-				// the program to gracefully handle redraws requested by the OS.
-
-				// Draw.
-
-				// Queue a RedrawRequested event.
-				//
-				// You only need to call this if you've determined that you need to redraw in
-				// applications which do not always need to. Applications that redraw continuously
-				// can render here instead.
-				// self.window.as_ref().unwrap().request_redraw();
-
 				match state.render() {
 					Ok(_) => {},
 					Err(e) => log::error!("Unable to render: {:#?}", e),
@@ -164,15 +150,14 @@ impl ApplicationHandler for App {
 	}
 }
 
-// ----------------------------- WGPU shit -----------------------------
-
 struct WGPUState {
-	surface: wgpu::Surface<'static>,
-	device: wgpu::Device,
-	queue: wgpu::Queue,
-	config: wgpu::SurfaceConfiguration,
+	surface: Surface<'static>,
+	device: Device,
+	queue: Queue,
+	config: SurfaceConfiguration,
 
 	window: Arc<Window>,
+	texture_format: TextureFormat,
 }
 
 impl WGPUState {
@@ -234,6 +219,7 @@ impl WGPUState {
 			queue,
 			config,
 			window,
+			texture_format: todo!(),
 		}
 	}
 
@@ -300,10 +286,27 @@ impl WGPUState {
 	}
 }
 
-// ----------------------------- EGUI shit -----------------------------
-
 struct EGUIState {
-	ctx: Context,
-	state: egui_winit::State,
-	renderer: egui_wgpu::Renderer,
+	state: State,
+	renderer: Renderer,
+}
+
+impl EGUIState {
+	fn new(window: &Window, wgpu_state: &WGPUState) -> Self {
+		let state = State::new(
+			egui::Context::default(),
+			egui::ViewportId::ROOT,
+			window,
+			Some(window.scale_factor() as f32),
+			None,
+			None,
+		);
+		let renderer = Renderer::new(
+			&wgpu_state.device,
+			wgpu_state.texture_format,
+			RendererOptions::default(),
+		);
+
+		Self { state, renderer }
+	}
 }
