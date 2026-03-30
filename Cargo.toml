@@ -17,12 +17,7 @@ log             = "0.4"
 pollster        = { version = "0.4", features = ["macro"] }
 rand            = "0.10"
 tray-icon       = "0.21"
-wgpu            = { version = "29", default-features = false, features = [
-	"parking_lot",
-	"std",
-	"vulkan",
-	"wgsl"
-] }
+wgpu            = { version = "29", default-features = false, features = ["dx12", "parking_lot", "std", "vulkan", "wgsl"] }
 window-vibrancy = "0.7"
 winit           = { version = "0.30", default-features = false, features = [
 	"rwh_06"

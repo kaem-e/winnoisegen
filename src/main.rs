@@ -7,9 +7,13 @@ use cpal::{
 	self, Host, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use egui;
-use egui_wgpu::{self, Renderer, RendererOptions};
-use egui_winit::{self, State};
+// use egui;
+// use egui_wgpu::{self, Renderer, RendererOptions};
+// use egui_winit::{self, State};
+use log::{
+	Level, LevelFilter, debug as log_debug, error as log_error, info as log_info, log,
+	trace as log_trace,
+};
 use env_logger;
 use pollster::FutureExt as _;
 use std::{path::Path, sync::Arc};
@@ -17,20 +21,20 @@ use tray_icon::{
 	self, Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttributes, TrayIconEvent,
 	menu::MenuEvent,
 };
-use wgpu::{self, *};
-use window_vibrancy::apply_mica;
+use wgpu::*;
+use window_vibrancy::{apply_mica, apply_tabbed};
 use winit::{
 	application::ApplicationHandler,
 	dpi::{LogicalPosition, LogicalSize},
 	event::{ElementState, KeyEvent, WindowEvent},
 	event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-	keyboard::{self, KeyCode, PhysicalKey},
+	keyboard::{KeyCode, PhysicalKey},
 	platform::windows::{CornerPreference, WindowAttributesExtWindows},
 	window::{Theme, Window, WindowAttributes, WindowId, WindowLevel},
 };
 
 fn main() -> Result<(), anyhow::Error> {
-	env_logger::init();
+	env_logger::builder().filter_level(LevelFilter::Info).init();
 
 	// set up cpal stream
 	let device = Host::default()
@@ -123,25 +127,24 @@ struct App {
 	cpal_state: (Stream, bool),
 	tray_icon: TrayIcon,
 	tray_icons: (Icon, Icon),
-	window: Option<Window>,
+	window: Option<Arc<Window>>,
 	wgpu_state: Option<WGPUState>,
-	egui_state: Option<EGUIState>,
+	// egui_state: Option<EGUIState>,
 }
 
 struct WGPUState {
 	surface: Surface<'static>,
+	surface_config: SurfaceConfiguration,
 	device: Device,
 	queue: Queue,
-	config: SurfaceConfiguration,
 
-	window: Arc<Window>,
-	texture_format: TextureFormat,
+	render_pipeline: RenderPipeline,
 }
 
-struct EGUIState {
-	state: State,
-	renderer: Renderer,
-}
+// struct EGUIState {
+// 	state: State,
+// 	renderer: Renderer,
+// }
 
 impl App {
 	pub fn new(cpal_stream: Stream, tray_icon: TrayIcon, tray_icons: (Icon, Icon)) -> Self {
@@ -152,8 +155,7 @@ impl App {
 			tray_icons,
 
 			wgpu_state: None,
-			egui_state: None,
-
+			// egui_state: None,
 			window: None,
 		}
 	}
@@ -166,40 +168,44 @@ const YOFFSET: f64 = 60.0;
 
 impl ApplicationHandler<UserEvent> for App {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-		let monitor_size = {
-			let monitor_handle = event_loop.primary_monitor().unwrap();
-			let monitor_size = monitor_handle.scale_factor();
-			monitor_handle.size().to_logical::<f64>(monitor_size)
-		};
+		if self.window.is_none() || self.wgpu_state.is_none() {
+			let monitor_size = {
+				let monitor_handle = event_loop.primary_monitor().unwrap();
+				let monitor_size = monitor_handle.scale_factor();
+				monitor_handle.size().to_logical::<f64>(monitor_size)
+			};
 
-		let window_attributes = WindowAttributes::default()
-			.with_corner_preference(CornerPreference::Round)
-			.with_window_level(WindowLevel::AlwaysOnTop)
-			.with_undecorated_shadow(true)
-			.with_drag_and_drop(false)
-			.with_skip_taskbar(true)
-			.with_decorations(false)
-			.with_transparent(true)
-			.with_title("ambience")
-			.with_transparent(true)
-			.with_resizable(false)
-			.with_visible(false)
-			.with_active(false)
-			.with_position(LogicalPosition::new(
-				monitor_size.width - (WINDOW_WIDTH + XOFFSET),
-				monitor_size.height - (WINDOW_HEIGHT + YOFFSET),
-			));
+			let window_attributes = WindowAttributes::default()
+				.with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+				.with_corner_preference(CornerPreference::Round)
+				.with_window_level(WindowLevel::AlwaysOnTop)
+				.with_undecorated_shadow(true)
+				.with_drag_and_drop(false)
+				.with_skip_taskbar(true)
+				.with_decorations(false)
+				.with_transparent(true)
+				.with_title("ambience")
+				.with_resizable(false)
+				.with_visible(false)
+				.with_active(false)
+				.with_position(LogicalPosition::new(
+					monitor_size.width - (WINDOW_WIDTH + XOFFSET),
+					monitor_size.height - (WINDOW_HEIGHT + YOFFSET),
+				));
 
-		let window = event_loop.create_window(window_attributes).unwrap();
-		//
-		match window.theme() {
-			Some(Theme::Light) => self.tray_icon.set_icon(Some(self.tray_icons.0.clone())),
-			_ => self.tray_icon.set_icon(Some(self.tray_icons.1.clone())),
-		};
+			let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+			apply_tabbed(&window, None).unwrap();
 
-		// self.wgpu_state = Some(WGPUState::new(Arc::new(window)).block_on());
-		self.wgpu_state = None;
-		self.window = Some(window)
+			match window.theme() {
+				Some(Theme::Light) => self.tray_icon.set_icon(Some(self.tray_icons.0.clone())),
+				_ => self.tray_icon.set_icon(Some(self.tray_icons.1.clone())),
+			};
+
+			self.wgpu_state = Some(WGPUState::new(window.clone()).block_on());
+			self.window = Some(window)
+		} else {
+			log_info!("app resumed and state already present");
+		}
 	}
 
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -218,9 +224,16 @@ impl ApplicationHandler<UserEvent> for App {
 					Some(true) | None => window.set_visible(false),
 					Some(false) => {
 						window.set_visible(true); // window needs to be visible before we clear it
-						window.request_inner_size(LogicalSize::new(0.0, 0.0));
-						apply_mica(&window, None).unwrap();
+
+						// winit initializes a window with the stupid windows painter.
+						// in order to bypass this we either can do some unsafe
+						// shenanegans, or just resize the window to 0 and then to our
+						// size to clear it
+						window.request_inner_size(LogicalSize::new(0, 0));
 						window.request_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+
+						window.focus_window();
+						window.request_redraw();
 					},
 				};
 			},
@@ -237,6 +250,9 @@ impl ApplicationHandler<UserEvent> for App {
 	}
 
 	fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+		let wgpu_state = self.wgpu_state.as_mut().unwrap();
+		let window = self.window.as_ref().unwrap();
+
 		match event {
 			// close window with close event or by pressing escape
 			#[rustfmt::skip]
@@ -273,13 +289,19 @@ impl ApplicationHandler<UserEvent> for App {
 					.unwrap(),
 			},
 
-			// WindowEvent::Resized(s) => state.resize(s.width, s.height),
+			WindowEvent::Resized(s) => wgpu_state.resize(s.width, s.height),
+
 			WindowEvent::RedrawRequested => {
-				self.window.as_ref().unwrap().request_redraw();
-				// 	match state.render() {
-				// 		Ok(_) => {},
-				// 		Err(e) => log::error!("Unable to render: {:#?}", e),
-				// 	};
+				if {
+					let w = window.inner_size();
+					w.width > 0 && w.height > 0 && window.is_visible().unwrap()
+				} {
+					match wgpu_state.render() {
+						Ok(_) => {},
+						Err(e) => log_error!("Unable to render: {:#?}", e),
+					};
+				}
+				// self.window.as_ref().unwrap().request_redraw();
 			},
 			_ => {},
 		}
@@ -294,131 +316,188 @@ fn toggle_playback(cpal_state: &mut (Stream, bool)) {
 	cpal_state.1 = !cpal_state.1;
 }
 
-// impl WGPUState {
-// 	pub async fn new(window: Arc<Window>) -> Self {
-// 		// BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-// 		let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-// 			backends: wgpu::Backends::PRIMARY,
-// 			..wgpu::InstanceDescriptor::new_without_display_handle()
-// 		});
+impl WGPUState {
+	pub async fn new(window: Arc<Window>) -> Self {
+		let instance = Instance::new(InstanceDescriptor {
+			backends: Backends::DX12, // vulkan wont let us expose different draw call formats so
+			backend_options: BackendOptions {
+				dx12: Dx12BackendOptions {
+					presentation_system: Dx12SwapchainKind::DxgiFromVisual,
+					..Default::default()
+				},
+				..Default::default()
+			},
+			..InstanceDescriptor::new_without_display_handle()
+		});
 
-// 		let surface = instance.create_surface(window.clone()).unwrap();
+		let window_size = window.inner_size();
+		let surface = instance.create_surface(window).unwrap();
+		let adapter = instance
+			.request_adapter(&RequestAdapterOptions {
+				power_preference: PowerPreference::HighPerformance,
+				compatible_surface: Some(&surface),
+				force_fallback_adapter: false,
+			})
+			.await
+			.unwrap();
 
-// 		// The adapter is a handle for our actual graphics card. You can use this
-// 		// to get information about the graphics card, such as its name and what
-// 		// backend the adapter uses
-// 		let adapter = instance
-// 			.request_adapter(&wgpu::RequestAdapterOptions {
-// 				power_preference: wgpu::PowerPreference::LowPower,
-// 				compatible_surface: Some(&surface),
-// 				force_fallback_adapter: false,
-// 			})
-// 			.await
-// 			.unwrap();
+		let (device, queue) = adapter
+			.request_device(&DeviceDescriptor {
+				label: Some("Main Device"),
+				..Default::default()
+			})
+			.await
+			.unwrap();
 
-// 		let (device, queue) = adapter
-// 			.request_device(&wgpu::DeviceDescriptor {
-// 				label: Some("Main Device"),
-// 				..Default::default()
-// 			})
-// 			.await
-// 			.unwrap();
+		let surface_caps = surface.get_capabilities(&adapter);
+		// [src\main.rs:338:22] surface.get_capabilities(&adapter) = SurfaceCapabilities {
+		//     formats: [
+		//         Bgra8UnormSrgb,
+		//         Rgba8UnormSrgb,
+		//         Bgra8Unorm,
+		//         Rgba8Unorm,
+		//         Rgb10a2Unorm,
+		//         Rgba16Float,
+		//     ],
+		//     present_modes: [
+		//         Mailbox,
+		//         Fifo,
+		//         Immediate,
+		//     ],
+		//     alpha_modes: [
+		//         Auto,
+		//         Inherit,
+		//         Opaque,
+		//         PostMultiplied,
+		//         PreMultiplied,
+		//     ],
+		//     usages: TextureUsages(
+		//         COPY_SRC | COPY_DST | RENDER_ATTACHMENT,
+		//     ),
+		// }
 
-// 		let surface_caps = surface.get_capabilities(&adapter);
-// 		let size = window.inner_size();
-// 		let config = wgpu::SurfaceConfiguration {
-// 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-// 			format: surface_caps
-// 				.formats
-// 				.iter()
-// 				.find(|f| {
-// 					// Shader code in this tutorial assumes an sRGB surface texture. Using a different
-// 					// one will result in all the colors coming out darker. If you want to support non
-// 					// sRGB surfaces, you'll need to account for that when drawing to the frame.
-// 					f.is_srgb()
-// 				})
-// 				.copied()
-// 				.unwrap_or(surface_caps.formats[0]),
-// 			width: size.width,
-// 			height: size.height,
-// 			present_mode: wgpu::PresentMode::Fifo,
-// 			alpha_mode: surface_caps.alpha_modes[0],
-// 			view_formats: vec![],
-// 			desired_maximum_frame_latency: 2,
-// 		};
+		let surface_config = SurfaceConfiguration {
+			usage: TextureUsages::RENDER_ATTACHMENT,
+			// format: surface_caps.formats[0],
+			format: TextureFormat::Rgba16Float,
+			width: window_size.width,
+			height: window_size.height,
+			present_mode: PresentMode::Fifo,
+			// alpha_mode: surface_caps.alpha_modes[0],
+			alpha_mode: CompositeAlphaMode::PreMultiplied,
+			view_formats: vec![],
+			desired_maximum_frame_latency: 2,
+		};
 
-// 		Self {
-// 			surface,
-// 			device,
-// 			queue,
-// 			config,
-// 			window,
-// 			texture_format: todo!(),
-// 		}
-// 	}
+		// // if you get rid of the resized method this needs to be done atleast
+		// // once to make the surface thats configured like,,,,,,,,,, actually
+		// // use the config we provide it
+		// surface.configure(&device, &config);
 
-// 	pub fn resize(&mut self, width: u32, height: u32) {
-// 		// wgpu crashes if the window size is less than 1x1
-// 		if width > 0 && height > 0 {
-// 			self.config.width = width;
-// 			self.config.height = height;
-// 			self.surface.configure(&self.device, &self.config);
-// 		}
-// 	}
+		let shader_module = device.create_shader_module(include_wgsl!("shader.wgsl"));
+		let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+			label: Some("super penis balls triangle pipeline"),
+			layout: None,
+			vertex: VertexState {
+				module: &shader_module,
+				entry_point: None,
+				compilation_options: PipelineCompilationOptions::default(),
+				buffers: &[],
+			},
+			fragment: Some(FragmentState {
+				module: &shader_module,
+				entry_point: None,
+				compilation_options: PipelineCompilationOptions::default(),
+				targets: &[Some(ColorTargetState {
+					format: surface_config.format,
+					blend: Some(BlendState::ALPHA_BLENDING),
+					write_mask: ColorWrites::ALL,
+				})],
+			}),
 
-// 	pub fn render(&mut self) -> anyhow::Result<()> {
-// 		self.window.request_redraw();
+			multisample: MultisampleState::default(),
+			primitive: PrimitiveState::default(),
+			depth_stencil: None,
+			multiview_mask: None,
+			cache: None,
+		});
 
-// 		let output = match self.surface.get_current_texture() {
-// 			wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
-// 			wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => surface_texture,
-// 			wgpu::CurrentSurfaceTexture::Outdated => {
-// 				self.surface.configure(&self.device, &self.config);
-// 				return Ok(()); // Skip this frame
-// 			},
-// 			_ => panic!("Surface error!"),
-// 		};
+		Self {
+			surface,
+			surface_config,
+			device,
+			queue,
 
-// 		let view = output
-// 			.texture
-// 			.create_view(&wgpu::TextureViewDescriptor::default());
+			render_pipeline,
+		}
+	}
 
-// 		let mut encoder = self
-// 			.device
-// 			.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-// 				label: Some("Main Render Encoder"),
-// 			});
+	pub fn render(&mut self) -> anyhow::Result<()> {
+		let output = match self.surface.get_current_texture() {
+			CurrentSurfaceTexture::Success(s) | CurrentSurfaceTexture::Suboptimal(s) => s,
+			CurrentSurfaceTexture::Outdated => {
+				self.surface.configure(&self.device, &self.surface_config);
+				return Ok(()); // Skip this frame
+			},
+			_ => panic!("Surface error!"),
+		};
 
-// 		let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-// 			label: Some("Render Pass"),
-// 			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-// 				depth_slice: None,
-// 				view: &view,
-// 				resolve_target: None,
-// 				ops: wgpu::Operations {
-// 					load: wgpu::LoadOp::Clear(wgpu::Color {
-// 						r: 0.9,
-// 						g: 0.2,
-// 						b: 0.5,
-// 						a: 1.0,
-// 					}),
-// 					store: wgpu::StoreOp::Store,
-// 				},
-// 			})],
-// 			depth_stencil_attachment: None,
-// 			occlusion_query_set: None,
-// 			timestamp_writes: None,
-// 			multiview_mask: None,
-// 		});
-// 		drop(render_pass);
+		let view = output
+			.texture
+			.create_view(&TextureViewDescriptor::default());
 
-// 		// submit will accept anything that implements IntoIter
-// 		self.queue.submit(std::iter::once(encoder.finish()));
-// 		output.present();
+		let mut encoder = self
+			.device
+			.create_command_encoder(&CommandEncoderDescriptor {
+				label: Some("Main Render Encoder"),
+			});
 
-// 		Ok(())
-// 	}
-// }
+		let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+			label: Some("Render Pass"),
+			color_attachments: &[Some(RenderPassColorAttachment {
+				depth_slice: None,
+				view: &view,
+				resolve_target: None,
+				ops: Operations {
+					load: LoadOp::Clear(
+						// Color {
+						// 	r: 0.6,
+						// 	g: 0.02,
+						// 	b: 0.35,
+						// 	a: 0.2,
+						// },
+						Color::TRANSPARENT,
+					),
+					store: StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: None,
+			occlusion_query_set: None,
+			timestamp_writes: None,
+			multiview_mask: None,
+		});
+
+		render_pass.set_pipeline(&self.render_pipeline);
+		render_pass.draw(0..6, 0..1);
+
+		drop(render_pass);
+
+		// submit will accept anything that implements IntoIter
+		self.queue.submit(std::iter::once(encoder.finish()));
+		output.present();
+
+		Ok(())
+	}
+
+	pub fn resize(&mut self, width: u32, height: u32) {
+		// wgpu crashes if the window size is less than 1x1
+		if width > 0 && height > 0 {
+			self.surface_config.width = width;
+			self.surface_config.height = height;
+			self.surface.configure(&self.device, &self.surface_config);
+		}
+	}
+}
 
 // impl EGUIState {
 // 	fn new(window: &Window, wgpu_state: &WGPUState) -> Self {
