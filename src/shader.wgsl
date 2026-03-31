@@ -44,4 +44,5 @@ fn frag_main(input: VertexOutput) -> @location(0) vec4f {
 	let alpha = smoothstep(0.5, 0.0, dist);
 
 	return vec4f(input.color, alpha);
+	// return vec4f(input.color, 1.0);
 }

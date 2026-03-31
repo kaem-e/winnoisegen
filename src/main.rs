@@ -1,7 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![allow(unused)]
 #![feature(float_minimum_maximum, portable_simd)]
-
 use anyhow;
 use cpal::{
 	self, Host, Stream,
@@ -10,13 +9,21 @@ use cpal::{
 // use egui;
 // use egui_wgpu::{self, Renderer, RendererOptions};
 // use egui_winit::{self, State};
+use env_logger;
 use log::{
 	Level, LevelFilter, debug as log_debug, error as log_error, info as log_info, log,
 	trace as log_trace,
 };
-use env_logger;
+mod log_dbg;
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use pollster::FutureExt as _;
-use std::{path::Path, sync::Arc};
+use std::{
+	borrow::Cow,
+	fs,
+	ops::Deref,
+	path::{self, Path},
+	sync::{Arc, LazyLock, RwLock},
+};
 use tray_icon::{
 	self, Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttributes, TrayIconEvent,
 	menu::MenuEvent,
@@ -32,6 +39,13 @@ use winit::{
 	platform::windows::{CornerPreference, WindowAttributesExtWindows},
 	window::{Theme, Window, WindowAttributes, WindowId, WindowLevel},
 };
+
+#[derive(Debug)]
+enum UserEvent {
+	TrayIconEvent(TrayIconEvent),
+	MenuEvent(MenuEvent),
+	ShaderFileChanged,
+}
 
 fn main() -> Result<(), anyhow::Error> {
 	env_logger::builder().filter_level(LevelFilter::Info).init();
@@ -68,6 +82,9 @@ fn main() -> Result<(), anyhow::Error> {
 		None,
 	)?;
 
+	let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+	event_loop.set_control_flow(ControlFlow::Wait);
+
 	// tray icon
 	let icon_dark = {
 		let image = image::open(Path::new(concat!(
@@ -91,15 +108,11 @@ fn main() -> Result<(), anyhow::Error> {
 		let rgba = image.into_raw();
 		Icon::from_rgba(rgba, width, height).expect("Failed to open icon")
 	};
-
 	let tray_icon = TrayIcon::new(TrayIconAttributes {
 		tooltip: Some(String::from("penis balls tooltip")),
 		title: Some(String::from("ambience")),
 		..Default::default()
 	})?;
-
-	let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
-	event_loop.set_control_flow(ControlFlow::Wait);
 
 	// give event loop proxy to tray-icon and menu items within tray-icon
 	let p = event_loop.create_proxy();
@@ -111,22 +124,31 @@ fn main() -> Result<(), anyhow::Error> {
 		p.send_event(UserEvent::MenuEvent(event));
 	}));
 
-	let mut app = App::new(stream, tray_icon, (icon_dark, icon_light));
+	// use notify to watch the shader file for changes
+	let p = event_loop.create_proxy();
+	let watcher = RecommendedWatcher::new(
+		move |res| {
+			log_info!("Shader File Changed");
+			// dbg_log!(res);
+			p.send_event(UserEvent::ShaderFileChanged);
+		},
+		Config::default(),
+	)
+	.unwrap();
+
+	let mut app = App::new(stream, tray_icon, (icon_dark, icon_light), watcher);
 	event_loop.run_app(&mut app)?;
 
 	Ok(())
-}
-
-#[derive(Debug)]
-enum UserEvent {
-	TrayIconEvent(TrayIconEvent),
-	MenuEvent(MenuEvent),
 }
 
 struct App {
 	cpal_state: (Stream, bool),
 	tray_icon: TrayIcon,
 	tray_icons: (Icon, Icon),
+
+	shader_file_watcher: RecommendedWatcher,
+
 	window: Option<Arc<Window>>,
 	wgpu_state: Option<WGPUState>,
 	// egui_state: Option<EGUIState>,
@@ -137,8 +159,6 @@ struct WGPUState {
 	surface_config: SurfaceConfiguration,
 	device: Device,
 	queue: Queue,
-
-	render_pipeline: RenderPipeline,
 }
 
 // struct EGUIState {
@@ -147,12 +167,19 @@ struct WGPUState {
 // }
 
 impl App {
-	pub fn new(cpal_stream: Stream, tray_icon: TrayIcon, tray_icons: (Icon, Icon)) -> Self {
+	pub fn new(
+		cpal_stream: Stream,
+		tray_icon: TrayIcon,
+		tray_icons: (Icon, Icon),
+		shader_file_watcher: RecommendedWatcher,
+	) -> Self {
 		Self {
 			cpal_state: (cpal_stream, false),
 
 			tray_icon,
 			tray_icons,
+
+			shader_file_watcher,
 
 			wgpu_state: None,
 			// egui_state: None,
@@ -215,13 +242,33 @@ impl ApplicationHandler<UserEvent> for App {
 		};
 
 		match event {
-			#[rustfmt::skip]
+			UserEvent::ShaderFileChanged => {
+				let shadersource = fs::read_to_string(SHADER_FILEPATH).unwrap();
+				*SHADER.write().unwrap() = shadersource;
+				log_info!("Shader Reloaded");
+			},
+
+			// toggle playback on right mouse click of tray icon
 			UserEvent::TrayIconEvent(TrayIconEvent::Click {
 				button_state: MouseButtonState::Up,
-				button: MouseButton::Left, ..
+				button: MouseButton::Right,
+				..
+			}) => toggle_playback(&mut self.cpal_state),
+
+			// tray icon left clicked
+			UserEvent::TrayIconEvent(TrayIconEvent::Click {
+				button_state: MouseButtonState::Up,
+				button: MouseButton::Left,
+				..
 			}) => {
 				match window.is_visible() {
-					Some(true) | None => window.set_visible(false),
+					Some(true) | None => {
+						window.set_visible(false);
+						self
+							.shader_file_watcher
+							.unwatch(path::Path::new(SHADER_FILEPATH));
+						log_info!("unwatch watcher for {}", SHADER_FILEPATH);
+					},
 					Some(false) => {
 						window.set_visible(true); // window needs to be visible before we clear it
 
@@ -232,18 +279,17 @@ impl ApplicationHandler<UserEvent> for App {
 						window.request_inner_size(LogicalSize::new(0, 0));
 						window.request_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
 
+						self.shader_file_watcher.watch(
+							path::Path::new(SHADER_FILEPATH),
+							RecursiveMode::NonRecursive,
+						);
+						log_info!("set up watcher for {}", SHADER_FILEPATH);
+
 						window.focus_window();
 						window.request_redraw();
 					},
 				};
 			},
-
-			// toggle playback on right mouse
-			#[rustfmt::skip]
-			UserEvent::TrayIconEvent(TrayIconEvent::Click {
-				button_state: MouseButtonState::Up,
-				button: MouseButton::Right, ..
-			}) => toggle_playback(&mut self.cpal_state),
 
 			_e => {},
 		}
@@ -254,7 +300,7 @@ impl ApplicationHandler<UserEvent> for App {
 		let window = self.window.as_ref().unwrap();
 
 		match event {
-			// close window with close event or by pressing escape
+			// close window with by pressing escape
 			#[rustfmt::skip]
 			WindowEvent::KeyboardInput {
 				event: KeyEvent {
@@ -262,7 +308,12 @@ impl ApplicationHandler<UserEvent> for App {
 					state: ElementState::Pressed, ..
 				}, ..
 			} => {
-				self.window.as_ref().unwrap().set_visible(false);
+
+				window.set_visible(false);
+				self
+					.shader_file_watcher
+					.unwatch(path::Path::new(SHADER_FILEPATH));
+				log_info!("unwatch watcher for {}", SHADER_FILEPATH);
 			},
 
 			// close app when we actually close the window with alt+f4
@@ -301,7 +352,7 @@ impl ApplicationHandler<UserEvent> for App {
 						Err(e) => log_error!("Unable to render: {:#?}", e),
 					};
 				}
-				// self.window.as_ref().unwrap().request_redraw();
+				self.window.as_ref().unwrap().request_redraw();
 			},
 			_ => {},
 		}
@@ -309,12 +360,18 @@ impl ApplicationHandler<UserEvent> for App {
 }
 
 fn toggle_playback(cpal_state: &mut (Stream, bool)) {
-	match dbg!(cpal_state.1) {
+	match dbg_log!(cpal_state.1) {
 		true => cpal_state.0.pause().unwrap(),
 		false => cpal_state.0.play().unwrap(),
 	};
 	cpal_state.1 = !cpal_state.1;
 }
+
+const SHADER_FILEPATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shader.wgsl");
+// static SHADER: LazyLock<String> =
+// 	LazyLock::new(|| fs::read_to_string(SHADER_FILEPATH).unwrap());
+static SHADER: LazyLock<RwLock<String>> =
+	LazyLock::new(|| RwLock::new(fs::read_to_string(SHADER_FILEPATH).unwrap()));
 
 impl WGPUState {
 	pub async fn new(window: Arc<Window>) -> Self {
@@ -382,7 +439,7 @@ impl WGPUState {
 			format: TextureFormat::Rgba16Float,
 			width: window_size.width,
 			height: window_size.height,
-			present_mode: PresentMode::Fifo,
+			present_mode: PresentMode::Immediate,
 			// alpha_mode: surface_caps.alpha_modes[0],
 			alpha_mode: CompositeAlphaMode::PreMultiplied,
 			view_formats: vec![],
@@ -394,41 +451,11 @@ impl WGPUState {
 		// // use the config we provide it
 		// surface.configure(&device, &config);
 
-		let shader_module = device.create_shader_module(include_wgsl!("shader.wgsl"));
-		let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-			label: Some("super penis balls triangle pipeline"),
-			layout: None,
-			vertex: VertexState {
-				module: &shader_module,
-				entry_point: None,
-				compilation_options: PipelineCompilationOptions::default(),
-				buffers: &[],
-			},
-			fragment: Some(FragmentState {
-				module: &shader_module,
-				entry_point: None,
-				compilation_options: PipelineCompilationOptions::default(),
-				targets: &[Some(ColorTargetState {
-					format: surface_config.format,
-					blend: Some(BlendState::ALPHA_BLENDING),
-					write_mask: ColorWrites::ALL,
-				})],
-			}),
-
-			multisample: MultisampleState::default(),
-			primitive: PrimitiveState::default(),
-			depth_stencil: None,
-			multiview_mask: None,
-			cache: None,
-		});
-
 		Self {
 			surface,
 			surface_config,
 			device,
 			queue,
-
-			render_pipeline,
 		}
 	}
 
@@ -450,6 +477,40 @@ impl WGPUState {
 			.device
 			.create_command_encoder(&CommandEncoderDescriptor {
 				label: Some("Main Render Encoder"),
+			});
+
+		let shader_module = self.device.create_shader_module(ShaderModuleDescriptor {
+			label: Some("ultra glossy balls"),
+			source: ShaderSource::Wgsl(Cow::Owned(SHADER.read().unwrap().clone())),
+		});
+
+		let render_pipeline = self
+			.device
+			.create_render_pipeline(&RenderPipelineDescriptor {
+				label: Some("super penis balls triangle pipeline"),
+				layout: None,
+				vertex: VertexState {
+					module: &shader_module,
+					entry_point: None,
+					compilation_options: PipelineCompilationOptions::default(),
+					buffers: &[],
+				},
+				fragment: Some(FragmentState {
+					module: &shader_module,
+					entry_point: None,
+					compilation_options: PipelineCompilationOptions::default(),
+					targets: &[Some(ColorTargetState {
+						format: self.surface_config.format,
+						blend: Some(BlendState::ALPHA_BLENDING),
+						write_mask: ColorWrites::ALL,
+					})],
+				}),
+
+				multisample: MultisampleState::default(),
+				primitive: PrimitiveState::default(),
+				depth_stencil: None,
+				multiview_mask: None,
+				cache: None,
 			});
 
 		let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -477,7 +538,7 @@ impl WGPUState {
 			multiview_mask: None,
 		});
 
-		render_pass.set_pipeline(&self.render_pipeline);
+		render_pass.set_pipeline(&render_pipeline);
 		render_pass.draw(0..6, 0..1);
 
 		drop(render_pass);
