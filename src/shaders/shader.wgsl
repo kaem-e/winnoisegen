@@ -6,10 +6,10 @@ const pos = array<vec2f, 4>(
 );
 
 const color = array<vec3f, 4>(
-	vec3f(1, 0.53, 0.36),
-	vec3f(0.91, 0.02, 0.4),
+	vec3f(1.00, 0.53, 0.36),
+	vec3f(0.91, 0.02, 0.40),
 	vec3f(0.06, 0.81, 0.86),
-	vec3f(0.43, 0.38, 1),
+	vec3f(0.43, 0.38, 1.00),
 );
 
 struct VertexOutput {

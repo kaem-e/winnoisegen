@@ -10,6 +10,7 @@ egui            = "0.34"
 egui-wgpu       = { version = "0.34", features = ["winit"] }
 egui-winit      = { version = "0.34", default-features = false }
 env_logger      = { version = "0.11" }
+extfn           = "0.1"
 image           = { version = "0.25.10", default-features = false, features = [
 	"png"
 ] }
@@ -34,7 +35,6 @@ winit           = { version = "0.30", default-features = false, features = [
 # bitflags             = "2"
 # bytemuck             = "1"
 # cfg-if               = "1"
-# extfn                = "0.1"
 # hashbrown            = "0.16"
 # indexmap             = "2"
 # num-traits           = "0.2"
