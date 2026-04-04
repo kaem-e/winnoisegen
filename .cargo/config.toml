@@ -1,0 +1,2 @@
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"  # required by opus-rs crate, fuckass crate icl

@@ -16,6 +16,7 @@
 export def run-example [] {
 	# this lets rustanalyzer display all the warnings, but on compile warnings are supressed so thats cool
 	$env.RUSTFLAGS = "-A unused_variables"
+	$env.CMAKE_POLICY_VERSION_MINIMUM = "3.5" # Unfuck opus crate
 	match ($env.ZED_RELATIVE_FILE | path split) {
 		["examples", $name, ..] => { ^cargo run --example ($name | str replace ".rs" "") }
 		_ => { error make -u { msg: $"Editor File: ((ansi i) + $env.ZED_RELATIVE_FILE + (ansi rst))\nNot inside ((ansi yi) + "`examples`" + (ansi rst)) directory." } }
