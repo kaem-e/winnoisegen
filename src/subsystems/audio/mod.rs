@@ -2,16 +2,13 @@ use cpal::{
 	self, Host, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use log::{error, info};
-use opus::{Channels, Decoder};
+use log::error;
+use qoaudio::{QoaDecoder, QoaItem};
 use ringbuf::{
 	StaticRb,
 	traits::{Consumer, Observer, Producer, Split},
 };
 use std::thread;
-
-mod opus_atlas;
-use crate::subsystems::audio::opus_atlas::OpusAtlas;
 
 enum PlaybackState {
 	Playing,
@@ -23,18 +20,9 @@ pub struct AudioSubsystem {
 	playback_state: PlaybackState,
 }
 
-// Why 11,520?
-// The calculation for a "worst-case" single packet at 48kHz stereo is:
-// - Max duration: 120ms
-// - Samples per ms: 48
-// - Channels: 2 (Stereo)
-// > Total: 120 * 48 * 2 = 11,520
-//
-// Im allocating more than that just to make sure we have enough
-const RINGBUF_CAPACITY: usize = 12_000 * 2;
-
-#[allow(unused)]
-static ATLAS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/rain.atlas"));
+#[rustfmt::skip]
+static QOA_BINARY_BLOB: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/rain.qoa"));
+const RINGBUF_CAPACITY: usize = 40_000; // enough for 1 second (2 x 24_000 as stereo interleaved data)
 
 impl AudioSubsystem {
 	pub fn new() -> anyhow::Result<Self> {
@@ -60,40 +48,32 @@ impl AudioSubsystem {
 			})
 			.ok_or_else(|| anyhow::Error::msg("No supported stream config"))?;
 
-		// spawn thread for our opus packets decoder
-		let opus_handle = thread::spawn(move || {
-			let mut decoder = match Decoder::new(config.sample_rate, Channels::Stereo) {
-				Ok(d) => d,
-				Err(e) => {
-					error!("Failed to initialize opus decoder: {:#?}", e);
-					panic!()
-				},
-			};
-			let mut pcm_out = [0.0f32; 5760 * 10]; // Max opus frame size (120ms)
-
+		// spawn thread for our poa audio file decoder
+		let decoder_handle = thread::spawn(move || {
 			loop {
-				while prod.vacant_len() < pcm_out.len() / 10 {
-					info!("Parking the thread");
-					thread::park();
+				let mut decoder = match QoaDecoder::new(QOA_BINARY_BLOB) {
+					Ok(d) => d,
+					Err(e) => {
+						error!("Failed to initialize opus decoder: {:#?}", e);
+						panic!()
+					},
 				}
+				.filter_map(|a| match a {
+					Ok(QoaItem::Sample(a)) => Some(a as f32 / i16::MAX as f32),
+					Ok(QoaItem::FrameHeader(_)) => None,
+					Err(e) => {
+						error!("Error while decoding qoa frame: {:?}", e);
+						None
+					},
+				})
+				.peekable();
 
-				for x in OpusAtlas::load(ATLAS).iter() {
-					match decoder.decode_float(x, &mut pcm_out, false) {
-						// IMPORTANT:
-						//
-						// decode_float returns how many samples it decoded for a single channel.
-						//
-						// Since our audio source is a stereo signal (2 channels),
-						// this means that the `samples_decoded` number will be 1/2 of
-						// the number of samples it actually decoded.
-						//
-						// So we return from the beginning of the array the decoder wrote to,
-						// to 2 * the num of samples the decode_float method returns
-						Ok(num_samples_decoded) => {
-							prod.push_slice(&pcm_out[..num_samples_decoded * 2]);
-						},
-						Err(e) => error!("Opus decoder failed to decode packet: {:#?}", e),
-					};
+				while decoder.peek().is_some() {
+					while prod.vacant_len() < 50 {
+						thread::park();
+					}
+
+					prod.push_iter(&mut decoder);
 				}
 			}
 		});
@@ -111,18 +91,16 @@ impl AudioSubsystem {
 				// }
 
 				// write samples from the ringbuf to the buffer slice
-				info!("popping from the ring buffer");
 				cons.pop_slice(b);
 
 				// if were running low on writeable samples, wake the thread up
 				if cons.occupied_len() < (b.len() * 2) {
-					opus_handle.thread().unpark();
+					decoder_handle.thread().unpark();
 				}
 			},
 			|_| {},
 			None,
 		)?;
-
 		Ok(Self {
 			stream,
 			playback_state: PlaybackState::Paused, // stream is paused by default

@@ -11,23 +11,19 @@ egui-wgpu       = { version = "0.34", features = ["winit"] }
 egui-winit      = { version = "0.34", default-features = false }
 env_logger      = { version = "0.11" }
 extfn           = "0.1"
-hound = "3.5.1"
 image           = { version = "0.25.10", default-features = false, features = [
 	"png"
 ] }
 log             = "0.4"
 notify          = "8.2"
-opus            = "0.3"
-pollster        = { version = "0.4", features = ["macro"] }
-qoaudio = "0.7.0"
-rand            = "0.10"
+pollster        = "0.4"
+qoaudio         = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
 ringbuf         = "0.4"
 tray-icon       = "0.21"
 wgpu            = { version = "29", default-features = false, features = [
 	"dx12",
 	"parking_lot",
 	"std",
-	"vulkan",
 	"wgsl"
 ] }
 window-vibrancy = "0.7"
@@ -35,12 +31,12 @@ winit           = { version = "0.30", default-features = false, features = [
 	"rwh_06"
 ] }
 
-[build-dependencies]
-ogg = "0.9"
+[dev-dependencies]
+hound = "3.5"
 
 [profile.dev.package."*"]
-opt-level = 3  # do optimized builds for deps
-debug     = 2
+# opt-level = 3  # do optimized builds for deps
+# debug     = 2
 
 # fair game as they're brought in via needed deps
 # bitflags             = "2"
