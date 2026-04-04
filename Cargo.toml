@@ -1,7 +1,11 @@
+cargo-features = ["profile-rustflags"]
+
 [package]
 name    = "ambience"
 version = "0.1.0"
 edition = "2024"
+
+
 
 [dependencies]
 anyhow          = "1.0"
@@ -51,3 +55,9 @@ hound = "3.5"
 # thiserror            = "2"
 # unicode-segmentation = "1"
 # zerocopy             = "0.8"
+
+[profile.release]
+lto           = "fat"
+panic         = "abort"
+codegen-units = 1
+rustflags = ["-C", "target-cpu=native"]
