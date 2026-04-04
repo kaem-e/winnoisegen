@@ -1,5 +1,5 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
-// #![feature(float_minimum_maximum, portable_simd, stmt_expr_attributes)]
+#![feature(portable_simd)]
 // #![allow(unused)]
 
 mod app;
