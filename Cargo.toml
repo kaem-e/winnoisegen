@@ -5,33 +5,30 @@ name    = "ambience"
 version = "0.1.0"
 edition = "2024"
 
-
-
 [dependencies]
-anyhow          = "1.0"
-cpal            = "0.17"
-egui            = "0.34"
-egui-wgpu       = { version = "0.34", features = ["winit"] }
-egui-winit      = { version = "0.34", default-features = false }
-env_logger      = { version = "0.11" }
-extfn           = "0.1"
-image           = { version = "0.25.10", default-features = false, features = [
+anyhow             = "1.0"
+cpal               = "0.17"
+extfn              = "0.1"
+image              = { version = "0.25.10", default-features = false, features = [
 	"png"
 ] }
-log             = "0.4"
-notify          = "8.2"
-pollster        = "0.4"
-qoaudio         = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
-ringbuf         = "0.4"
-tray-icon       = "0.21"
-wgpu            = { version = "29", default-features = false, features = [
+log                = "0.4"
+notify             = "8.2"
+pollster           = "0.4"
+qoaudio            = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
+ringbuf            = "0.4"
+tracing            = { version = "0.1", features = ["log"] }
+tracing-appender   = { version = "0.2", features = ["parking_lot"] }
+tracing-subscriber = "0.3"
+tray-icon          = "0.21"
+wgpu               = { version = "29", default-features = false, features = [
 	"dx12",
 	"parking_lot",
 	"std",
 	"wgsl"
 ] }
-window-vibrancy = "0.7"
-winit           = { version = "0.30", default-features = false, features = [
+window-vibrancy    = "0.7"
+winit              = { version = "0.30", default-features = false, features = [
 	"rwh_06"
 ] }
 
@@ -60,4 +57,4 @@ hound = "3.5"
 lto           = "fat"
 panic         = "abort"
 codegen-units = 1
-rustflags = ["-C", "target-cpu=native"]
+rustflags     = ["-C", "target-cpu=native"]

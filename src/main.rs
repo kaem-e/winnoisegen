@@ -2,17 +2,25 @@
 #![feature(portable_simd)]
 // #![allow(unused)]
 
+use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
+use winit::event_loop::{ControlFlow, EventLoop};
+
 mod app;
 mod subsystems;
 mod utils;
 
-use log::LevelFilter;
-use winit::event_loop::{ControlFlow, EventLoop};
-
 use crate::app::{App, UserEvent};
 
 fn main() -> anyhow::Result<()> {
-	env_logger::builder().filter_level(LevelFilter::Info).init();
+	let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
+
+	tracing_subscriber::registry()
+		.with(fmt::layer().with_writer(non_blocking))
+		.with(LevelFilter::INFO) // This replaces your .filter_level(LevelFilter::Info)
+		.init();
+
+	tracing::info!("This will show up!");
+	tracing::debug!("This will be filtered out.");
 
 	let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 	event_loop.set_control_flow(ControlFlow::Wait);
