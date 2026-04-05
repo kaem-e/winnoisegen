@@ -56,7 +56,7 @@ impl TrayIconSubsystem {
 		})
 	}
 
-	pub(crate) fn set_theme(&self, theme: Theme) -> anyhow::Result<()> {
+	pub fn set_theme(&self, theme: Theme) -> anyhow::Result<()> {
 		match theme {
 			Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
 			Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,

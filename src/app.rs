@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use egui_winit::EventResponse;
 use log::*;
 use notify::{Event, EventKind};
 use notify::{RecursiveMode, Watcher};
@@ -112,7 +111,7 @@ impl App {
 			file_watcher: WatcherSubsystem(watcher),
 			window: Option::Some(window),
 			renderer,
-			..
+			tray_icon,
 		} = self
 		else {
 			return Ok(());
@@ -137,6 +136,9 @@ impl App {
 				},
 				..,
 			) => audio.toggle_playback()?,
+
+			// change window icon when os theme changes
+			UserEvent::WinitWindowEvent(WindowEvent::ThemeChanged(t), _) => tray_icon.set_theme(t)?,
 
 			// Show Window on Tray icon left click
 			UserEvent::TrayIconEvent(TrayIconEvent::Click {
