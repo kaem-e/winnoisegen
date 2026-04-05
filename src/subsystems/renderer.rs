@@ -1,38 +1,25 @@
 use anyhow::anyhow;
-use egui::{Context, Ui, ViewportId};
-use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
-use egui_winit::State;
+
 use log::*;
+use pollster::FutureExt;
 use std::{borrow::Cow, fs, sync::Arc};
 use wgpu::*;
-use winit::{event_loop::EventLoopProxy, window::Window};
-
-use crate::{app::UserEvent, utils::log_err as _};
-
-const SHADER_FILEPATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders/shader.wgsl");
+use winit::window::Window;
 
 pub struct RendererSubsystem {
-	pub window: Arc<Window>,
-	proxy: EventLoopProxy<UserEvent>,
-
-	surface: Surface<'static>,
-	surface_config: SurfaceConfiguration,
-	render_pipeline: RenderPipeline,
-	device: Device,
-	queue: Queue,
-
-	pub state: State,
-	renderer: Renderer,
-	ctx: Context,
+	instance: Instance,
+	handles: Option<WGPUHandles>,
 }
 
 impl RendererSubsystem {
-	pub async fn new(window: Arc<Window>, proxy: EventLoopProxy<UserEvent>) -> anyhow::Result<Self> {
+	/// Initialize only the bare minimum from the renderer
+	pub async fn new() -> anyhow::Result<Self> {
 		let instance = Instance::new(InstanceDescriptor {
 			backends: Backends::DX12, // vulkan wont let us expose different draw call formats so
 			backend_options: BackendOptions {
 				dx12: Dx12BackendOptions {
 					presentation_system: Dx12SwapchainKind::DxgiFromVisual,
+					// shader_compiler: Dx12Compiler::Fxc,
 					..Default::default()
 				},
 				..Default::default()
@@ -40,24 +27,91 @@ impl RendererSubsystem {
 			..InstanceDescriptor::new_without_display_handle()
 		});
 
+		Ok(Self {
+			instance,
+			handles: None,
+		})
+	}
+
+	/// Call this when window is unhidden
+	/// We do this as the renderer while initialized takes up a lot of memory.
+	/// And it isnt needed all the time, so when the window is made visible, just call this
+	///
+	/// This will err if renderer is already initialized,
+	/// it only works after [`Self::uninitialize_wgpu()`] was called
+	pub fn initialize_wgpu(&mut self, window: Arc<Window>) -> anyhow::Result<()> {
+		self.handles = Some(WGPUHandles::new(&self.instance, window.clone()).block_on()?);
+		Ok(())
+	}
+
+	/// Call this when window is hidden
+	/// Other half of [`Self::initialize_wgpu`]
+	pub fn uninitialize_wgpu(&mut self) {
+		drop(self.handles.take())
+	}
+
+	/// Draw a single frame,
+	/// This will err if renderer wasnt initialized with [`Self::initialize_wgpu`]
+	pub fn redraw(&mut self) -> anyhow::Result<()> {
+		self
+			.handles
+			.as_mut()
+			.ok_or(anyhow!(
+				"WGPU State not initialized, `Self::initialize_wgpu()` needs to be called"
+			))?
+			.redraw()
+	}
+
+	/// Call when window size has changed
+	pub fn resize(&mut self, width: u32, height: u32) -> anyhow::Result<()> {
+		self
+			.handles
+			.as_mut()
+			.ok_or(anyhow!(
+				"WGPU State not initialized, `Self::initialize_wgpu()` needs to be called"
+			))?
+			.resize(width, height);
+
+		Ok(())
+	}
+
+	pub fn reload_shader(&mut self) -> anyhow::Result<()> {
+		self
+			.handles
+			.as_mut()
+			.ok_or(anyhow!(
+				"WGPU State not initialized, `Self::initialize_wgpu()` needs to be called"
+			))?
+			.reload_shader()
+	}
+}
+
+// -------------------------------------------------------------------------------------
+
+const SHADER_FILEPATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders/shader.wgsl");
+
+/// were just going to store the instance and device in the renderersubsystem,
+/// this will be initialized/deinitialized when the window is shown/hidden
+struct WGPUHandles {
+	surface: Surface<'static>,
+	surface_config: SurfaceConfiguration,
+	render_pipeline: RenderPipeline,
+	device: Device,
+	queue: Queue,
+}
+
+impl WGPUHandles {
+	async fn new(instance: &Instance, window: Arc<Window>) -> anyhow::Result<Self> {
 		let window_size = window.inner_size();
-		let surface = instance.create_surface(window.clone()).unwrap();
+		let surface = instance.create_surface(window).unwrap();
+
 		let adapter = instance
 			.request_adapter(&RequestAdapterOptions {
-				power_preference: PowerPreference::HighPerformance,
-				compatible_surface: Some(&surface),
+				power_preference: PowerPreference::LowPower,
+				compatible_surface: None,
 				force_fallback_adapter: false,
 			})
-			.await
-			.unwrap();
-
-		let (device, queue) = adapter
-			.request_device(&DeviceDescriptor {
-				label: Some("Main Device"),
-				..Default::default()
-			})
-			.await
-			.unwrap();
+			.await?;
 
 		// [src\main.rs:338:22] surface.get_capabilities(&adapter) = SurfaceCapabilities {
 		//     formats: [
@@ -103,36 +157,30 @@ impl RendererSubsystem {
 			desired_maximum_frame_latency: 2,
 		};
 
-		// // if you get rid of the resized method this needs to be done atleast
-		// // once to make the surface thats configured like,,,,,,,,,, actually
-		// // use the config we provide it
+		let (device, queue) = adapter
+			.request_device(&DeviceDescriptor {
+				label: Some("Main Device"),
+				memory_hints: MemoryHints::MemoryUsage,
+				..Default::default()
+			})
+			.await?;
+
+		// if you get rid of the resized method this needs to be done atleast
+		// once to make the surface thats configured like,,,,,,,,,, actually
+		// use the config we provide it
 		surface.configure(&device, &surface_config);
 
 		let render_pipeline = Self::create_render_pipeline(&device, surface_config.format)?;
 
-		let ctx = Context::default();
-		let state = State::new(
-			ctx.clone(),
-			ViewportId::ROOT,
-			window.as_ref(),
-			Some(window.scale_factor() as f32),
-			None,
-			None,
-		);
-		let renderer = Renderer::new(&device, format, RendererOptions::default());
+		drop(adapter);
+
 
 		Ok(Self {
-			window,
-			proxy,
 			surface,
 			surface_config,
 			device,
 			queue,
 			render_pipeline,
-
-			state,
-			renderer,
-			ctx,
 		})
 	}
 
@@ -176,8 +224,6 @@ impl RendererSubsystem {
 
 	// single frame
 	pub fn redraw(&mut self) -> anyhow::Result<()> {
-		let window = self.window.as_ref();
-
 		// a single surface_texutre needs to be consistent and be the one used for all the draw calls for one frame
 		let surface_texture = match self.surface.get_current_texture() {
 			CurrentSurfaceTexture::Success(s) | CurrentSurfaceTexture::Suboptimal(s) => Ok(s),
@@ -225,63 +271,6 @@ impl RendererSubsystem {
 		render_pass.draw(0..6, 0..1);
 		drop(render_pass);
 
-		// egui
-		let raw_input = self.state.take_egui_input(window);
-
-		let full_output = self.ctx.run_ui(raw_input, |ui| {
-			Self::egui_ui(ui, &self.proxy);
-		});
-
-		self
-			.state
-			.handle_platform_output(window, full_output.platform_output);
-		let egui_ui_primitives = self
-			.ctx
-			.tessellate(full_output.shapes, full_output.pixels_per_point);
-
-		// Update GPU buffers and textures for Egui
-		for (texture_id, image_delta) in &full_output.textures_delta.set {
-			self
-				.renderer
-				.update_texture(&self.device, &self.queue, *texture_id, image_delta);
-		}
-		let screen_descriptor = ScreenDescriptor {
-			size_in_pixels: [self.surface_config.width, self.surface_config.height],
-			pixels_per_point: window.scale_factor() as f32,
-		};
-
-		self.renderer.update_buffers(
-			&self.device,
-			&self.queue,
-			&mut encoder,
-			&egui_ui_primitives,
-			&screen_descriptor,
-		);
-
-		let egui_render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-			label: Some("EGUI Render Pass"),
-			color_attachments: &[Some(RenderPassColorAttachment {
-				view: &view,
-				resolve_target: None,
-				ops: Operations {
-					load: LoadOp::Load, // reuse prev pass's output
-					store: StoreOp::Store,
-				},
-				depth_slice: None,
-			})],
-			depth_stencil_attachment: None,
-			multiview_mask: None,
-			timestamp_writes: None,
-			occlusion_query_set: None,
-		});
-
-		self.renderer.render(
-			&mut egui_render_pass.forget_lifetime(),
-			&egui_ui_primitives,
-			&screen_descriptor,
-		);
-		// drop(egui_render_pass); // not needed. egui_wgpu's renderer will drop this for us
-
 		self.queue.submit(std::iter::once(encoder.finish()));
 		surface_texture.present();
 
@@ -304,30 +293,4 @@ impl RendererSubsystem {
 		info!("Shader Reloaded");
 		Ok(())
 	}
-
-	fn egui_ui(ui: &mut Ui, proxy: &EventLoopProxy<UserEvent>) {
-		use egui::*;
-
-		Window::new("Manual Setup").show(ui, |ui| {
-			ui.label("Successfully wired winit + wgpu + egui manually!");
-			ui.horizontal(|ui| {
-				if ui.button("Exit").clicked() {
-					proxy
-						.send_event(UserEvent::UIEvent(GUIEvent::CloseRequested))
-						.log_err();
-				}
-				if ui.button("Play/Pause").clicked() {
-					proxy
-						.send_event(UserEvent::UIEvent(GUIEvent::TogglePlayback))
-						.log_err();
-				}
-			})
-		});
-	}
-}
-
-#[derive(Debug)]
-pub enum GUIEvent {
-	CloseRequested,
-	TogglePlayback,
 }

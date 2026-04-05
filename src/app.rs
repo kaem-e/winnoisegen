@@ -7,6 +7,7 @@ use pollster::FutureExt as _;
 use std::{path::Path, sync::Arc};
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 use window_vibrancy::*;
+use winit::window::Window;
 use winit::{
 	dpi::LogicalPosition,
 	event::*,
@@ -17,19 +18,17 @@ use winit::{
 };
 
 use crate::subsystems::{
-	audio::AudioSubsystem,
-	renderer::{GUIEvent, RendererSubsystem},
-	tray_icon::TrayIconSubsystem,
+	audio::AudioSubsystem, renderer::RendererSubsystem, tray_icon::TrayIconSubsystem,
 	watcher::WatcherSubsystem,
 };
 
-#[allow(unused)]
 #[derive(Debug)]
 pub enum UserEvent {
 	TrayIconEvent(TrayIconEvent),
 	ShaderFileChanged(Event),
-	UIEvent(GUIEvent),
+	#[allow(unused)]
 	WinitWindowEvent(WindowEvent, WindowId),
+	#[allow(unused)]
 	WinitDeviceEvent(DeviceEvent, DeviceId),
 }
 
@@ -37,8 +36,9 @@ pub struct App {
 	audio: AudioSubsystem,
 	tray_icon: TrayIconSubsystem,
 	file_watcher: WatcherSubsystem,
-	renderer: Option<RendererSubsystem>,
-	proxy: EventLoopProxy<UserEvent>,
+
+	window: Option<Arc<Window>>,
+	renderer: RendererSubsystem,
 }
 
 const SHADERS_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders");
@@ -54,14 +54,14 @@ impl App {
 			audio: AudioSubsystem::new()?,
 			tray_icon: TrayIconSubsystem::new(proxy.clone())?,
 			file_watcher: WatcherSubsystem::new(proxy.clone())?,
-			renderer: None,
-			proxy,
+			renderer: RendererSubsystem::new().block_on()?,
+
+			window: None,
 		})
 	}
 
 	pub fn initialize(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
-		// Graphics have already been initialized
-		if self.renderer.is_some() {
+		if self.window.is_some() {
 			return Ok(());
 		}
 
@@ -96,7 +96,7 @@ impl App {
 		self.tray_icon.set_theme(window.theme().unwrap())?;
 
 		apply_tabbed(&window, None).unwrap();
-		self.renderer = Some(RendererSubsystem::new(window, self.proxy.clone()).block_on()?);
+		self.window = Some(window);
 
 		Ok(())
 	}
@@ -108,26 +108,15 @@ impl App {
 	) -> anyhow::Result<()> {
 		// destructure everything for convenient use
 		let App {
-			renderer: Option::Some(renderer),
 			audio,
 			file_watcher: WatcherSubsystem(watcher),
+			window: Option::Some(window),
+			renderer,
 			..
 		} = self
 		else {
 			return Ok(());
 		};
-		let window = renderer.window.as_ref();
-
-		// Pipe any WindowEvent we receive into egui's input handling first and foremost
-		if let UserEvent::WinitWindowEvent(ref e, _) = event {
-			let EventResponse { consumed, repaint } = renderer.state.on_window_event(window, e);
-			if consumed {
-				return Ok(());
-			}
-			if repaint {
-				window.request_redraw();
-			}
-		}
 
 		match event {
 			// Toggle Playback on spacebar press within the app or on tray icon right click
@@ -136,7 +125,6 @@ impl App {
 				button: MouseButton::Right,
 				..
 			})
-			| UserEvent::UIEvent(GUIEvent::TogglePlayback)
 			| UserEvent::WinitWindowEvent(
 				WindowEvent::KeyboardInput {
 					event:
@@ -158,14 +146,18 @@ impl App {
 			}) => {
 				match window.is_visible() {
 					Some(true) | None => {
+						info!("hiding window");
 						window.set_visible(false);
+						renderer.uninitialize_wgpu();
+
 						watcher.unwatch(Path::new(SHADERS_DIRECTORY))?;
 						info!("unwatch watcher for {}", SHADERS_DIRECTORY);
 					},
 					Some(false) => {
+						info!("spawning window");
+						renderer.initialize_wgpu(window.clone())?;
+
 						window.set_visible(true);
-						// let _ = window.request_inner_size(LogicalSize::new(0, 0));
-						// let _ = window.request_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
 
 						watcher.watch(Path::new(SHADERS_DIRECTORY), RecursiveMode::NonRecursive)?;
 						info!("set up watcher for {}", SHADERS_DIRECTORY);
@@ -188,11 +180,11 @@ impl App {
 			// yknow, its just a tray icon, but this is smth you need to do for
 			// wgpu normally
 			#[rustfmt::skip]
-			UserEvent::WinitWindowEvent(WindowEvent::Resized(s), _) => renderer.resize(s.width, s.height),
+			UserEvent::WinitWindowEvent(WindowEvent::Resized(s), _) => renderer
+				.resize(s.width, s.height)?,
 
 			// Close winit's event loop when we receive request to do so
 			UserEvent::WinitWindowEvent(WindowEvent::CloseRequested, _)
-			| UserEvent::UIEvent(GUIEvent::CloseRequested)
 			| UserEvent::WinitWindowEvent(
 				WindowEvent::KeyboardInput {
 					event:
@@ -216,16 +208,16 @@ impl App {
 	}
 
 	pub fn redraw(&mut self) {
-		let renderer = self.renderer.as_mut().unwrap();
+		let window = self.window.as_ref().unwrap();
 
-		let s = renderer.window.inner_size();
+		let s = window.inner_size();
 		if s.width > 0 && s.height > 0 {
-			match renderer.redraw() {
+			match self.renderer.redraw() {
 				Ok(_) => {},
 				Err(e) => error!("Renderer Error: {:#?}", e),
 			};
 		}
 
-		renderer.window.request_redraw();
+		window.request_redraw();
 	}
 }

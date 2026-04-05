@@ -74,7 +74,7 @@ macro_rules! dbg_log {
 
 /// Consumes Result and just logs it with `Error` Severity
 #[extfn]
-pub fn log_err<T: std::fmt::Debug>(self: Result<(), EventLoopClosed<T>>) -> () {
+pub fn log_err<T: std::fmt::Debug>(self: Result<(), EventLoopClosed<T>>) {
 	match self {
 		Ok(_) => (),
 		Err(e) => error!("Error While Sending Events: {:#?}", e),
