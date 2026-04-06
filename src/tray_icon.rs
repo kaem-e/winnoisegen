@@ -2,9 +2,7 @@ use std::path::Path;
 
 use image::open;
 use tray_icon::{Icon, TrayIcon, TrayIconAttributes, TrayIconEvent};
-use winit::{event_loop::EventLoopProxy, window::Theme};
 
-use crate::{app::UserEvent, utils::log_err as _};
 
 pub struct TrayIconSubsystem {
 	icon_dark: Icon,
@@ -14,7 +12,7 @@ pub struct TrayIconSubsystem {
 }
 
 impl TrayIconSubsystem {
-	pub fn new(proxy: EventLoopProxy<UserEvent>) -> anyhow::Result<Self> {
+	pub fn new() -> anyhow::Result<Self> {
 		let icon_dark = {
 			let image = open(Path::new(concat!(
 				env!("CARGO_MANIFEST_DIR"),
@@ -44,10 +42,10 @@ impl TrayIconSubsystem {
 			..Default::default()
 		})?;
 
-		// give event loop proxy to tray-icon and menu items within tray-icon
-		TrayIconEvent::set_event_handler(Some(move |event| {
-			proxy.send_event(UserEvent::TrayIconEvent(event)).log_err();
-		}));
+		// // give event loop proxy to tray-icon and menu items within tray-icon
+		// TrayIconEvent::set_event_handler(Some(move |event| {
+		// 	proxy.send_event(UserEvent::TrayIconEvent(event)).log_err();
+		// }));
 
 		Ok(Self {
 			icon_dark,
@@ -56,11 +54,11 @@ impl TrayIconSubsystem {
 		})
 	}
 
-	pub fn set_theme(&self, theme: Theme) -> anyhow::Result<()> {
-		match theme {
-			Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
-			Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
-		}
-		Ok(())
-	}
+	// pub fn set_theme(&self, theme: Theme) -> anyhow::Result<()> {
+	// 	match theme {
+	// 		Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
+	// 		Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
+	// 	}
+	// 	Ok(())
+	// }
 }

@@ -1,6 +1,4 @@
-use extfn::extfn;
 use log::error;
-use winit::event_loop::EventLoopClosed;
 
 /// Prints and returns the value of a given expression for quick and dirty
 /// logging-based debugging.
@@ -70,13 +68,4 @@ macro_rules! dbg_log {
 
 	// 4. Empty call
 	() => { ::log::info!("[{}:{}:{}]", file!(), line!(), column!()) };
-}
-
-/// Consumes Result and just logs it with `Error` Severity
-#[extfn]
-pub fn log_err<T: std::fmt::Debug>(self: Result<(), EventLoopClosed<T>>) {
-	match self {
-		Ok(_) => (),
-		Err(e) => error!("Error While Sending Events: {:#?}", e),
-	};
 }

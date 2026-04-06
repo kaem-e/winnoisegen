@@ -2,7 +2,7 @@ use cpal::{
 	self, Host, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use log::error;
+use log::*;
 use qoaudio::{QoaDecoder, QoaItem};
 use ringbuf::{
 	HeapRb,
