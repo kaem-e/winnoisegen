@@ -8,13 +8,13 @@ edition = "2024"
 [dependencies]
 anyhow     = "1.0"
 cpal       = "0.17"
-env_logger = { version = "0.11.10", default-features = false }
-image      = { version = "0.25.10", default-features = false, features = ["png"] }
+env_logger = { version = "0.11", default-features = false }
+image      = { version = "0.25", default-features = false, features = ["png"] }
 log        = "0.4"
-pollster   = "0.4"
 qoaudio    = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
 ringbuf    = "0.4"
-tray-icon  = { version = "0.21", default-features = false }
+tray-icon  = { version = "0.22", default-features = false }
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 hound = "3.5"

@@ -38,20 +38,20 @@
 		"shell": {
 			"with_arguments": {
 				"program": "nu",
-				"args": ["--no-history", "--no-config-file", "--no-std-lib"]
-			}
-		}
+				"args": ["--no-history", "--no-config-file", "--no-std-lib"],
+			},
+		},
 	},
 
 	{
-		"label": "Cargo Run",
-		"command": "cargo run",
-		"env": {
-			// Supress unused_variables warnings in compiler output,
-			// but still allow rustanalyzer to show them
-			"RUSTFLAGS": "-A unused_variables",
-			"CMAKE_POLICY_VERSION_MINIMUM": "3.5" // Unfuck opus crate
+		"label": "Run App",
+		"command": "use $ZED_WORKTREE_ROOT/.zed/task.nu *; run-app",
+
+		"shell": {
+			"with_arguments": {
+				"program": "nu",
+				"args": ["--no-history", "--no-config-file", "--no-std-lib"],
+			},
 		},
-		"hide": "on_success"
-	}
+	},
 ]

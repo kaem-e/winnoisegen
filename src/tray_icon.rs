@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use image::open;
-use tray_icon::{Icon, TrayIcon, TrayIconAttributes, TrayIconEvent};
-
+use tray_icon::{Icon, TrayIcon, TrayIconAttributes, TrayIconEvent, TrayIconEventReceiver};
+use windows::Win32::Foundation::HWND;
 
 pub struct TrayIconSubsystem {
 	icon_dark: Icon,
@@ -39,8 +39,11 @@ impl TrayIconSubsystem {
 		let tray_icon = TrayIcon::new(TrayIconAttributes {
 			tooltip: Some(String::from("penis balls tooltip")),
 			title: Some(String::from("ambience")),
+			icon: Some(icon_dark.clone()),
 			..Default::default()
 		})?;
+
+		// HWND(tray_icon.window_handle());
 
 		// // give event loop proxy to tray-icon and menu items within tray-icon
 		// TrayIconEvent::set_event_handler(Some(move |event| {
@@ -54,11 +57,11 @@ impl TrayIconSubsystem {
 		})
 	}
 
-	// pub fn set_theme(&self, theme: Theme) -> anyhow::Result<()> {
-	// 	match theme {
-	// 		Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
-	// 		Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
-	// 	}
-	// 	Ok(())
-	// }
+	pub fn set_theme(&self) -> anyhow::Result<()> {
+		// 	match theme {
+		// 		Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
+		// 		Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
+		// 	}
+		Ok(())
+	}
 }
