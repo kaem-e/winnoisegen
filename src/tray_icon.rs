@@ -1,10 +1,6 @@
+use log::*;
 use std::path::Path;
-
-use image::open;
-use tray_icon::{
-	Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttributes, TrayIconEvent,
-	TrayIconEventReceiver,
-};
+use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttributes, TrayIconEvent};
 use windows::Win32::{
 	Foundation::{HWND, LPARAM, WPARAM},
 	UI::WindowsAndMessaging::{PostMessageW, WM_APP},
@@ -13,17 +9,19 @@ use windows::Win32::{
 pub struct TrayIconSubsystem {
 	icon_dark: Icon,
 	icon_light: Icon,
+	theme: Theme,
 
 	tray_icon: TrayIcon,
 }
 
 pub const TRAY_ICON_EVENT: u32 = WM_APP + 1;
-
+pub const EVENT_RIGHT_CLICK: usize = 1;
+pub const EVENT_LEFT_CLICK: usize = 0;
 
 impl TrayIconSubsystem {
-	pub fn new() -> anyhow::Result<Self> {
+	pub fn new(theme: Theme) -> anyhow::Result<Self> {
 		let icon_dark = {
-			let image = open(Path::new(concat!(
+			let image = image::open(Path::new(concat!(
 				env!("CARGO_MANIFEST_DIR"),
 				"/assets/Icon.png"
 			)))?
@@ -34,7 +32,7 @@ impl TrayIconSubsystem {
 			Icon::from_rgba(rgba, width, height).expect("Failed to open icon")
 		};
 		let icon_light = {
-			let image = open(Path::new(concat!(
+			let image = image::open(Path::new(concat!(
 				env!("CARGO_MANIFEST_DIR"),
 				"/assets/Icon-light.png"
 			)))?
@@ -71,21 +69,37 @@ impl TrayIconSubsystem {
 				} => 1,
 				_ => return,
 			};
-			PostMessageW(Some(HWND(hwnd as _)), WM_APP + 1, WPARAM(w), LPARAM(0));
+			match PostMessageW(Some(HWND(hwnd as _)), WM_APP + 1, WPARAM(w), LPARAM(0)) {
+				Ok(_) => {},
+				Err(e) => error!("Failed pushing to Win32 Queue: {:#?}", e),
+			};
 		}));
 
 		Ok(Self {
 			icon_dark,
 			icon_light,
+			theme,
+
 			tray_icon,
 		})
 	}
 
-	pub fn set_theme(&self) -> anyhow::Result<()> {
-		// 	match theme {
-		// 		Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
-		// 		Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
-		// 	}
+	pub fn set_theme(&mut self, theme: Theme) -> anyhow::Result<()> {
+		if theme != self.theme {
+			match theme {
+				Theme::Light => self.tray_icon.set_icon(Some(self.icon_dark.clone()))?,
+				Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
+			}
+
+			self.theme = theme;
+			info!("Set Current Theme to: {:#?}", &self.theme);
+		}
 		Ok(())
 	}
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum Theme {
+	Light,
+	Dark,
 }

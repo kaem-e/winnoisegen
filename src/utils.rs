@@ -1,5 +1,3 @@
-use log::error;
-
 /// Prints and returns the value of a given expression for quick and dirty
 /// logging-based debugging.
 ///
