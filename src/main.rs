@@ -4,12 +4,17 @@
 
 use ::tray_icon::TrayIconEvent;
 use log::*;
-use windows::Win32::UI::WindowsAndMessaging::{
-	DispatchMessageA, DispatchMessageW, GetMessageA, GetMessageW, MSG, PM_REMOVE, PeekMessageW,
-	TranslateMessage, WaitMessage,
+use windows::Win32::{
+	Foundation::WPARAM,
+	UI::WindowsAndMessaging::{
+		DispatchMessageA, DispatchMessageW, GetMessageA, GetMessageW, MSG, PM_REMOVE, PeekMessageW, PostQuitMessage, TranslateMessage, WM_APP, WaitMessage
+	},
 };
 
-use crate::tray_icon::TrayIconSubsystem;
+use crate::{
+	audio::AudioSubsystem,
+	tray_icon::{TRAY_ICON_EVENT, TrayIconSubsystem},
+};
 
 mod audio;
 mod tray_icon;
@@ -21,70 +26,30 @@ fn main() -> anyhow::Result<()> {
 		.init();
 
 	let tray_icon = TrayIconSubsystem::new()?;
+	let mut audio = AudioSubsystem::new()?;
 
 	unsafe {
 		let mut msg = MSG::default();
-		'main: loop {
-			// 1. Process ALL pending Windows messages
-			while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).into() {
-				TranslateMessage(&msg);
-				DispatchMessageW(&msg);
-			}
+		while GetMessageW(&mut msg, None, 0, 0).into() {
+			TranslateMessage(&msg);
+			DispatchMessageW(&msg);
 
-			for event in TrayIconEvent::receiver().try_iter() {
-				match event {
-					TrayIconEvent::Click {
-						button,
-						button_state,
-						..
-					} => {
-						dbg_log!(button, button_state);
-					},
-					_ => {},
-				}
+			match (msg.message, msg.wParam, msg.hwnd) {
+				(msg @ TRAY_ICON_EVENT, WPARAM(p @ 0), _) => {
+					info!("Left click");
+					audio.toggle_playback()?
+				},
+				(msg @ TRAY_ICON_EVENT, WPARAM(p @ 1), _) => {
+					info!("Right click");
+					PostQuitMessage(0);
+					// return Ok(());
+				},
+				_ => continue,
 			}
-
-			// 3. Prevent 100% CPU usage
-			// If there were no messages and no events, wait for the next system event
-			// Or simply use: std::thread::sleep(std::time::Duration::from_millis(5));
-			WaitMessage().ok();
 		}
 	}
 
-	// drop(tray_icon);
-	// Ok(())
+	drop(tray_icon);
+	drop(audio);
+	Ok(())
 }
-
-// unsafe {
-// 	let mut msg = MSG::default();
-// 	while GetMessageW(&mut msg, None, 0, 0).into() {
-// 		// We skip TranslateMessage because we don't care about text input/WM_CHAR
-// 		DispatchMessageW(&msg);
-
-// 		// Check our tray events
-// 		for event in TrayIconEvent::receiver().try_iter() {
-// 			match event {
-// 				TrayIconEvent::Click {
-// 					position,
-// 					rect,
-// 					button,
-// 					button_state,
-// 					..
-// 				} => {
-// 					dbg_log!(position, rect, button, button_state);
-// 				},
-// 				TrayIconEvent::DoubleClick {
-// 					position,
-// 					rect,
-// 					button,
-// 					..
-// 				} => {
-// 					dbg_log!(position, rect, button);
-// 				},
-// 				_ => {},
-// 			};
-// 			// dbg_log!("event received");
-// 		}
-// 		// WaitMessage().ok();
-// 	}
-// }
