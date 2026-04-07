@@ -2,6 +2,9 @@
 #![feature(portable_simd)]
 
 
+#[cfg(not(target_os = "windows"))]
+compile_error!("This application only supports Windows.");
+
 // Potential TODO's:
 // - Isolate all the windows specific code into its own platform module,
 //   > honestly cba becase like we only need 2 or three things that are heavily tied
