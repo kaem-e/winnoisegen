@@ -1,9 +1,11 @@
 cargo-features = ["profile-rustflags"]
 
 [package]
-name    = "ambience"
-version = "0.1.0"
-edition = "2024"
+name        = "winnoisegen"
+version     = "0.1.0"
+edition     = "2024"
+authors     = ["Kaem <kaemviotto@icloud.com>"]
+description = "Create constant rain noise from the tray"
 
 [dependencies]
 anyhow     = "1.0"
@@ -14,17 +16,13 @@ log        = "0.4"
 qoaudio    = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
 ringbuf    = "0.4"
 tray-icon  = { version = "0.22", default-features = false }
-windows    = { version = "0.62.2", features = [
+windows    = { version = "0.62", features = [
 	"Win32_System_Registry",
 	"Win32_UI_WindowsAndMessaging"
 ] }
 
 [dev-dependencies]
 hound = "3.5"
-
-[profile.dev.package."*"]
-# opt-level = 3  # do optimized builds for deps
-# debug     = 2
 
 [profile.release]
 lto           = "fat"
