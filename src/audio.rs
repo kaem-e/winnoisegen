@@ -3,13 +3,13 @@ use cpal::{
 	self, Host, SampleFormat, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use log::*;
 use qoaudio::{QoaDecoder, QoaItem};
 use ringbuf::{
 	HeapRb,
 	traits::{Consumer, Observer, Producer, Split},
 };
 use std::{simd::prelude::*, thread, time::Duration};
+use tracing::error;
 
 /// Manually enumerated enum representing the current playback state of the audio subsystem
 // this is only really loosely synced with the cpal stream itself. idk it seems ot be working fine so far byt yeah

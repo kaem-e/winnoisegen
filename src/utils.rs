@@ -2,7 +2,7 @@
 /// logging-based debugging.
 ///
 /// This macro is a drop-in replacement for the standard library's `dbg!` macro,
-/// but instead of printing to `stderr`, it routes output through the `log` crate.
+/// but instead of printing to `stderr`, it routes output through `tracing`.
 ///
 /// # Shorthand Severity Levels
 ///
@@ -36,11 +36,11 @@ macro_rules! dbg_log {
 	($level:ident; $($val:expr),+ $(,)?) => {
 		$crate::dbg_log!(
 			match stringify!($level) {
-				"W" => ::log::Level::Warn,
-				"E" => ::log::Level::Error,
-				"T" => ::log::Level::Trace,
-				"D" => ::log::Level::Debug,
-				_ => ::log::Level::Info, // Default for "I" or anything else
+				"W" => ::tracing::Level::WARN,
+				"E" => ::tracing::Level::ERROR,
+				"T" => ::tracing::Level::TRACE,
+				"D" => ::tracing::Level::DEBUG,
+				_ => ::tracing::Level::INFO, // Default for "I" or anything else
 			};
 			$($val),+
 		)
@@ -51,7 +51,7 @@ macro_rules! dbg_log {
 		($({
 			match $val {
 				tmp => {
-					::log::log!($level, "[{}:{}:{}] {} = {:#?}",
+					::tracing::event!($level, "[{}:{}:{}] {} = {:#?}",
 						file!(), line!(), column!(), stringify!($val), &tmp);
 					tmp
 				}
@@ -61,9 +61,9 @@ macro_rules! dbg_log {
 
 	// 3. Default branch (no level specified)
 	($($val:expr),+ $(,)?) => {
-		$crate::dbg_log!(::log::Level::Info; $($val),+)
+		$crate::dbg_log!(::tracing::Level::INFO; $($val),+)
 	};
 
 	// 4. Empty call
-	() => { ::log::info!("[{}:{}:{}]", file!(), line!(), column!()) };
+	() => { ::tracing::info!("[{}:{}:{}]", file!(), line!(), column!()) };
 }

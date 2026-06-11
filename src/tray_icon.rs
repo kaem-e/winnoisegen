@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use log::*;
+use tracing::{error, info};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttributes, TrayIconEvent};
 use windows::{
 	Win32::{

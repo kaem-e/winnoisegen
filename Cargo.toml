@@ -8,18 +8,26 @@ authors     = ["Kaem <kaemviotto@icloud.com>"]
 description = "Create constant rain noise from the tray"
 
 [dependencies]
-anyhow     = "1.0"
-cpal       = "0.17"
-env_logger = { version = "0.11", default-features = false }
-image      = { version = "0.25", default-features = false, features = ["png"] }
-log        = "0.4"
-qoaudio    = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
-ringbuf    = "0.4"
-tray-icon  = { version = "0.22", default-features = false }
-windows    = { version = "0.62", features = [
-	"Win32_System_Registry",
-	"Win32_UI_WindowsAndMessaging"
-] }
+anyhow             = "1.0"
+cpal               = "0.17"
+image              = {
+	version          = "0.25",
+	default-features = false,
+	features         = ["png"]
+}
+qoaudio            = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
+ringbuf            = "0.4"
+tracing            = "0.1"
+tracing-subscriber = {
+	version          = "0.3",
+	default-features = false,
+	features         = ["fmt", "std"]
+}
+tray-icon          = { version = "0.22", default-features = false }
+windows            = {
+	version  = "0.62",
+	features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging"]
+}
 
 [dev-dependencies]
 hound = "3.5"

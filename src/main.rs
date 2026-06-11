@@ -28,8 +28,8 @@ mod tray_icon;
 mod utils;
 
 fn main() -> anyhow::Result<()> {
-	env_logger::builder()
-		.filter_level(log::LevelFilter::Info)
+	tracing_subscriber::fmt()
+		.with_max_level(tracing::Level::INFO)
 		.init();
 
 	let mut tray_icon = TrayIconSubsystem::new()?;
