@@ -1,7 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![feature(portable_simd)]
 
-
 #[cfg(not(target_os = "windows"))]
 compile_error!("This application only supports Windows.");
 

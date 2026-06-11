@@ -1,5 +1,6 @@
+use anyhow::Context as _;
 use cpal::{
-	self, Host, Stream,
+	self, Host, SampleFormat, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use log::*;
@@ -38,30 +39,39 @@ impl AudioSubsystem {
 		// init cpal's device and config to create a stream later
 		let device = Host::default()
 			.default_output_device()
-			.ok_or_else(|| anyhow::Error::msg("Failed to get default output device"))?;
-		let config = device
-			.supported_output_configs()?
-			.find_map(|a| {
-				let cond = a.max_sample_rate() == 48000
-					&& a.sample_format() == cpal::SampleFormat::F32
-					&& a.channels() == 2;
+			.context("Failed to get default output device")?;
 
-				match cond {
-					true => Some(a.with_max_sample_rate().config()),
-					false => None,
-				}
+		let config = &device
+			.supported_output_configs()
+			.context("Failed to get default output configs for device")?
+			.find(|c| {
+				c.sample_format() == SampleFormat::F32
+					&& c.channels() == 2
+					&& (c.min_sample_rate()..=c.max_sample_rate()).contains(&44100u32)
 			})
-			.ok_or_else(|| anyhow::Error::msg("No supported stream config"))?;
+			.context("Failed to find suitable config for device output configs")?
+			.try_with_sample_rate(44100)
+			.context("Failed to get config with sample rate")?
+			.config();
 
 		// spawn thread for our poa audio file decoder
 		// this sends decoded samples to the ringbuffer when needed
 		let _ = thread::spawn(move || decoder_thread(prod));
 
+		// let mut sine_osc_phase: f32 = 0.0;
+		// let mut sine_osc = move || -> f32 {
+		//     use std::f32::consts::PI;
+		//     const PHASE_INC: f32 = (2.0 * PI / 44100.0) * 440.0;
+		//     let result = sine_osc_phase.sin();
+		//     sine_osc_phase = (sine_osc_phase + PHASE_INC) % (2.0 * PI);
+		//     result
+		// };
+
 		let stream = device.build_output_stream(
 			&config,
-			move |b: &mut [f32], _| {
+			move |frame: &mut [f32], _| {
 				// write samples from the ringbuf to the buffer slice
-				cons.pop_slice(b);
+				cons.pop_slice(frame);
 
 				// if cons.is_empty() {
 				// 	b.fill(0.0);
