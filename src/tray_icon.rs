@@ -64,7 +64,7 @@ impl TrayIconSubsystem {
 		let icon_dark = {
 			let image = image::open(std::path::Path::new(concat!(
 				env!("CARGO_MANIFEST_DIR"),
-				"/assets/Icon.png"
+				"/assets/icon-dark.png"
 			)))?
 			.into_rgba8();
 
@@ -75,7 +75,7 @@ impl TrayIconSubsystem {
 		let icon_light = {
 			let image = image::open(std::path::Path::new(concat!(
 				env!("CARGO_MANIFEST_DIR"),
-				"/assets/Icon-light.png"
+				"/assets/icon-light.png"
 			)))?
 			.into_rgba8();
 
