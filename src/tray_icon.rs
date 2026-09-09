@@ -29,16 +29,16 @@ pub struct TrayIconSubsystem {
 }
 
 /// `msg` range on the windows message type that the tray icon sends its events to
-pub const TRAY_ICON_EVENT: u32 = WM_APP + 1;
-/// wparam value corresponding to a single right click event
+pub const EVENTGROUP_TRAYICON: u32 = WM_APP + 1;
+/// WPARAM value corresponding to a single right-click event
 pub const EVENT_RIGHT_CLICK: usize = 1;
-/// wparam value corresponding to a single left click event
+/// WPARAM value corresponding to a single left-click event
 pub const EVENT_LEFT_CLICK: usize = 0;
 
 impl TrayIconSubsystem {
 	/// Initializes the tray and tray icon's.
 	///
-	/// Events produced by the tray icon are sent to win32's event queue.
+	/// Events produced by the tray icon are sent to Win32's event queue.
 	/// Which should be queried independently
 	///
 	/// Example:
@@ -86,14 +86,14 @@ impl TrayIconSubsystem {
 
 		let tray_icon = TrayIcon::new(TrayIconAttributes {
 			tooltip: Some(format!("Playback: {:#?}", PlaybackState::Paused)),
-			title: Some(String::from("ambience")),
+			title: Some(String::from("winnoisegen")),
 			icon: None,
 			..Default::default()
 		})?;
 
-		// Make Tray Icon Events send out events to the win32 event loop
-		// SAFETY: blah blah yes this should be wrapped in a rawwindowhandle i dont care.
-		// the as usize is because this is a *mut c_void which cant be sent to a thread safely
+		// Make Tray Icon Events send out events to the Win32 event loop
+		// SAFETY: blah blah yes this should be wrapped in a `RawWindowHandle` I don't care.
+		// The as `usize` is because this is a `*mut c_void` which can't be sent to a thread safely
 		// but were only giving it to this one single thread so like, shut up
 		let hwnd = tray_icon.window_handle() as usize;
 		TrayIconEvent::set_event_handler(Some(move |event| unsafe {
@@ -110,7 +110,7 @@ impl TrayIconSubsystem {
 				} => 1,
 				_ => return,
 			};
-			match PostMessageW(Some(HWND(hwnd as _)), WM_APP + 1, WPARAM(w), LPARAM(0)) {
+			match PostMessageW(Some(HWND(hwnd as _)), EVENTGROUP_TRAYICON, WPARAM(w), LPARAM(0)) {
 				Ok(()) => {},
 				Err(e) => error!("Failed pushing to Win32 Queue: {:#?}", e),
 			};
@@ -133,10 +133,10 @@ impl TrayIconSubsystem {
 	}
 
 	/// Sets the tooltip for this tray icon.
-	/// See comment at definition if you want to know why the `tray_icon` field isnt just pub
+	/// See the comment at the definition if you want to know why the `tray_icon` field isn't just pub
 	pub fn set_tooltip<S: AsRef<str>>(&self, tooltip: Option<S>) -> anyhow::Result<()> {
 		// Same as audio subsystem, making this pub can mean user can set the icon
-		// to something other than what... hmm actually they cant but whatever idk
+		// to something other than what… hmm actually they can't but whatever idk
 		// this is better
 		self.tray_icon.set_tooltip(tooltip)?;
 		Ok(())
@@ -165,10 +165,10 @@ impl TrayIconSubsystem {
 	}
 }
 
-/// Queries systsem theme registry key and returns the theme as an enumerated variant,
+/// Queries system theme registry key and returns the theme as an enumerated variant,
 ///
-/// Fails if there were any errors either retriving the regkey entry, or the
-/// returned value was a variant that doesnt make sense and is hence invalid
+/// Fails if there were any errors either retrieving the regkey entry, or the
+/// returned value was a variant that doesn't make sense and is hence invalid
 fn get_current_theme() -> anyhow::Result<Theme> {
 	unsafe {
 		let mut data: u32 = 0;

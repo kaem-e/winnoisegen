@@ -26,10 +26,12 @@ fn main() -> anyhow::Result<()> {
 	let mut sine_osc = move || -> f32 {
 		use std::f32::consts::PI;
 		const PHASE_INC: f32 = (2.0 * PI / 48000.0) * 440.0;
+
 		let result = sine_osc_phase.sin();
 		sine_osc_phase = (sine_osc_phase + PHASE_INC) % (2.0 * PI);
 		result
 	};
+
 	let stream_handle = device
 		.build_output_stream(
 			config,
@@ -48,6 +50,8 @@ fn main() -> anyhow::Result<()> {
 	stream_handle.play()?;
 	std::thread::sleep(std::time::Duration::from_secs(1));
 	stream_handle.pause()?;
+
 	println!("pebis balls");
+
 	Ok(())
 }
