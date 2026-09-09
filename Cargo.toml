@@ -3,31 +3,30 @@ cargo-features = ["profile-rustflags"]
 [package]
 name        = "winnoisegen"
 version     = "0.1.0"
-edition     = "2024"
 authors     = ["Kaem <kaemviotto@icloud.com>"]
+edition     = "2024"
 description = "Create constant rain noise from the tray"
 
 [dependencies]
 anyhow             = "1.0"
 cpal               = "0.17"
-image              = {
-	version          = "0.25",
-	default-features = false,
-	features         = ["png"]
-}
+image              = { version = "0.25", default-features = false, features = ["png"] }
 qoaudio            = { git = "https://github.com/rafaelcaricio/qoaudio.git" }
 ringbuf            = "0.4"
+scopeguard         = "1.2"
 tracing            = "0.1"
-tracing-subscriber = {
-	version          = "0.3",
-	default-features = false,
-	features         = ["fmt", "std"]
-}
+tracing-subscriber = "0.3"
 tray-icon          = { version = "0.22", default-features = false }
 windows            = {
 	version  = "0.62",
-	features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging"]
+	features = [
+		"Win32_Graphics_Gdi",
+		"Win32_System_LibraryLoader",
+		"Win32_System_Registry",
+		"Win32_UI_WindowsAndMessaging",
+	]
 }
+windows-core       = "0.62"
 
 [dev-dependencies]
 hound = "3.5"
