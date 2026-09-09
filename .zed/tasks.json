@@ -19,7 +19,7 @@
 	{
 		"label": "Run Example File",
 		"command": "use $ZED_WORKTREE_ROOT/.zed/task.nu *; run-example",
-		"hide": "on_success",
+		"hide": "never",
 		// Which shell to use when running a task inside the terminal.
 		// May take 3 values:
 		// 1. (default) Use the system's default terminal configuration in /etc/passwd

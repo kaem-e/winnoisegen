@@ -15,7 +15,6 @@
 
 export def run-example [] {
 	# this lets rustanalyzer display all the warnings, but on compile warnings are supressed so thats cool
-	$env.RUSTFLAGS = "-A unused_variables"
 	match ($env.ZED_RELATIVE_FILE | path split) {
 		["examples", $name, ..] => { ^cargo run --example ($name | str replace ".rs" "") }
 		_ => { error make -u { msg: $"Editor File: ((ansi i) + $env.ZED_RELATIVE_FILE + (ansi rst))\nNot inside ((ansi yi) + "`examples`" + (ansi rst)) directory." } }
@@ -23,6 +22,5 @@ export def run-example [] {
 }
 
 export def run-app [] {
-	$env.RUSTFLAGS = "-A unused_variables"
 	^cargo run
 }
