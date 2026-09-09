@@ -1,29 +1,40 @@
+use crate::audio::consumer_access::UnsafeConsumerExclusiveAccess as _;
 use anyhow::Context as _;
 use cpal::{
-	self, Host, SampleFormat, Stream,
+	self, ErrorKind, Host, SampleFormat, Stream,
 	traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use qoaudio::{QoaDecoder, QoaItem};
 use ringbuf::{
 	HeapRb,
-	traits::{Consumer, Observer, Producer, Split},
+	traits::{Observer, Producer, Split},
 };
 use std::{simd::prelude::*, thread, time::Duration};
-use tracing::error;
+use tracing::*;
+
+/// `msg` range on the windows message type that the tray icon sends its events to
+pub const EVENTGROUP_AUDIO: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
+/// WPARAM value corresponding to a default device switched event
+pub const EVENT_DEFAULT_DEVICE_SWITCHED: usize = 0;
 
 /// Manually enumerated enum representing the current playback state of the audio subsystem
-// this is only really loosely synced with the cpal stream itself. idk it seems ot be working fine so far byt yeah
 #[derive(Debug, Clone)]
 pub enum PlaybackState {
 	Playing,
 	Paused,
 }
 
+struct StreamState {
+	stream: Stream,
+	playback_state: PlaybackState,
+}
+
+type Cons = ringbuf::HeapCons<f32>;
+
 /// Subsystem that interfaces with the entire audio system.
 /// This is a largely independent system,
 pub struct AudioSubsystem {
-	stream: Stream,
-	playback_state: PlaybackState,
+	consumer: Cons,
+	cpal_stream: Option<StreamState>,
 }
 
 #[rustfmt::skip]
@@ -34,9 +45,41 @@ impl AudioSubsystem {
 	pub fn new() -> anyhow::Result<Self> {
 		// create ringbuf to give to both opus decoder thread and audio thread
 		let ringbuffer = HeapRb::<f32>::new(RINGBUF_CAPACITY);
-		let (prod, mut cons) = ringbuffer.split();
+		let (prod, cons) = ringbuffer.split();
 
-		// init cpal's device and config to create a stream later
+		// spawn thread for our poa audio file decoder
+		// this sends decoded samples to the ringbuffer
+		let _ = thread::spawn(move || {
+			let _guard = span!(Level::DEBUG, "decoder_thread");
+			decoder_thread(prod)
+		});
+
+		Ok(Self {
+			consumer: cons,
+			cpal_stream: None,
+		})
+	}
+
+	pub fn regenerate_stream(&mut self) -> anyhow::Result<()> {
+		debug!("regenerating cpal stream");
+
+		// SAFETY:
+		// Cpal implements Drop on its stream object that joins the audio thread
+		// it spawns, blocking until the thread does join.
+		//
+		// By explicitly dropping the stream here, we guaratee the previous
+		// ConsumerAccess is dropped before we re-initialize it, i.e. no thread
+		// can use it to access the consumer.
+		//
+		// This upholds the invariant for the spsc consumer that only one thread
+		// can access it at a time, thus creating this is always safe after
+		// dropping the cpal stream
+		//
+		// for wasapi: https://github.com/RustAudio/cpal/blob/e1612d5d98152f8dc2a62e1b51ef7cbf4f7f26b7/src/host/wasapi/stream.rs#L479-L495
+		// TODO: check if this upholds for other hosts, ive only verified windows
+		drop(self.cpal_stream.take());
+		let mut access = unsafe { self.consumer.unsafe_get_exclusive_access() };
+
 		let device = Host::default()
 			.default_output_device()
 			.context("Failed to get default output device")?;
@@ -54,56 +97,90 @@ impl AudioSubsystem {
 			.context("Failed to get config with sample rate")?
 			.config();
 
-		// spawn thread for our poa audio file decoder
-		// this sends decoded samples to the ringbuffer when needed
-		let _ = thread::spawn(move || decoder_thread(prod));
-
-		// let mut sine_osc_phase: f32 = 0.0;
-		// let mut sine_osc = move || -> f32 {
-		//     use std::f32::consts::PI;
-		//     const PHASE_INC: f32 = (2.0 * PI / 44100.0) * 440.0;
-		//     let result = sine_osc_phase.sin();
-		//     sine_osc_phase = (sine_osc_phase + PHASE_INC) % (2.0 * PI);
-		//     result
-		// };
-
 		let stream = device.build_output_stream(
 			config,
 			move |frame: &mut [f32], _| {
 				// write samples from the ringbuf to the buffer slice
-				cons.pop_slice(frame);
-
-				// if cons.is_empty() {
-				// 	b.fill(0.0);
-				// }
+				access.fill_frame(frame);
 			},
-			|_| {},
+			|e| {
+				match e.kind() {
+					// Small errors that can recover/are non-critical so we just continue and issue a warning
+					ErrorKind::Xrun | ErrorKind::RealtimeDenied | ErrorKind::DeviceBusy => {
+						warn!("Non-critical error: {:?}", e);
+					},
+
+					// Error that indicates invalidation, but can be recovered from by rebuilding the stream
+					ErrorKind::DeviceChanged
+					| ErrorKind::DeviceNotAvailable
+					| ErrorKind::InvalidInput
+					| ErrorKind::StreamInvalidated
+					| ErrorKind::UnsupportedConfig => {
+						warn!("Stream invalidation error: {e:?}. Posting message to rebuild stream.");
+						let thread_id = crate::MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Acquire);
+
+						use windows::Win32::Foundation::{LPARAM, WPARAM};
+						use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
+
+						match unsafe {
+							PostThreadMessageW(thread_id, EVENTGROUP_AUDIO, WPARAM(0), LPARAM(0))
+						} {
+							Ok(()) => {},
+							Err(e) => error!("Failed pushing to Win32 Queue: {:#?}", e),
+						};
+					},
+
+					// errors that theres no way to recover from so we just exit the application
+					ErrorKind::HostUnavailable
+					| ErrorKind::PermissionDenied
+					| ErrorKind::ResourceExhausted
+					| ErrorKind::BackendError
+					| ErrorKind::UnsupportedOperation
+					| ErrorKind::Other => {
+						error!("Fatal error: {:?}", e);
+						unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(2) }
+					},
+
+					// Catch all that just exists the app for a yet nonidentified error. we just exit the process outright
+					_ => {
+						error!("Unknown error: {:?}", e);
+						std::process::exit(1)
+					},
+				}
+			},
 			None,
 		)?;
 
-		Ok(Self {
+		self.cpal_stream = Some(StreamState {
 			stream,
 			playback_state: PlaybackState::Paused, // cpal stream is paused by default
-		})
+		});
+		Ok(())
 	}
 
 	/// Toggles playback of cpal stream between Playing and Paused
 	pub fn toggle_playback(&mut self) -> anyhow::Result<()> {
-		let Self {
-			stream,
-			playback_state,
-		} = self;
+		let _guard = span!(Level::DEBUG, "Playback Toggle");
 
-		match playback_state {
+		let Some(state) = &mut self.cpal_stream else {
+			return Err(anyhow::anyhow!("No stream to toggle playback on"));
+		};
+
+		match state.playback_state {
 			PlaybackState::Playing => {
-				stream.pause()?;
-				*playback_state = PlaybackState::Paused;
+				state.stream.pause()?;
+				state.playback_state = PlaybackState::Paused;
 			},
 			PlaybackState::Paused => {
-				stream.play()?;
-				*playback_state = PlaybackState::Playing;
+				state.stream.play()?;
+				state.playback_state = PlaybackState::Playing;
 			},
 		}
+
+		debug!(
+			"Toggled Playback: playback_state = {:?}",
+			state.playback_state
+		);
 
 		Ok(())
 	}
@@ -111,13 +188,18 @@ impl AudioSubsystem {
 	/// Retrive the current playback state
 	///
 	/// See comment at definition if you want to know why the `playback_state` field isnt just pub
-	pub fn get_playback_state(&self) -> PlaybackState {
+	pub fn get_playback_state(&self) -> anyhow::Result<PlaybackState> {
 		// I wrote a getter for this instead of just making the field itself pub
 		// because the playback state needs to stay in sync with the cpal stream,
 		// making it pub can mean anyone using the library can just change it
 		// breaking the logic. so yeah we just keep it private and return copies if
 		// someone needs them
-		self.playback_state.clone()
+
+		if let Some(state) = &self.cpal_stream {
+			Ok(state.playback_state.clone())
+		} else {
+			anyhow::bail!("No stream to get playback state from")
+		}
 	}
 }
 
@@ -128,6 +210,8 @@ impl AudioSubsystem {
 /// let handle = thread::spawn(move || decoder_thread(prod));
 /// ```
 fn decoder_thread(mut prod: ringbuf::HeapProd<f32>) {
+	use qoaudio::{QoaDecoder, QoaItem};
+
 	const BATCH_SIZE: usize = 1024;
 	const I16_MAX_INV: f32 = 1.0 / i16::MAX as f32; // Multiplication is much faster than division in SIMD operations
 
@@ -156,7 +240,9 @@ fn decoder_thread(mut prod: ringbuf::HeapProd<f32>) {
 						i16_buf[samples_collected] = s;
 						samples_collected += 1;
 					},
-					Some(Ok(QoaItem::FrameHeader(_))) => continue,
+					Some(Ok(QoaItem::FrameHeader(_h))) => {
+						trace!("Frame header read: {_h:?}");
+					},
 					Some(Err(e)) => {
 						error!("Error while decoding qoa frame: {:?}", e);
 						break; // Try to push what we have, then probably restart stream
@@ -203,6 +289,89 @@ fn decoder_thread(mut prod: ringbuf::HeapProd<f32>) {
 
 			// 4. Grouped Write
 			prod.push_slice(f32_slice);
+		}
+	}
+}
+
+mod consumer_access {
+	use crate::audio::Cons;
+	use ringbuf::traits::Consumer as _;
+	use std::sync::atomic::AtomicBool;
+	use tracing::*;
+
+	#[cfg(debug_assertions)]
+	static CONSUMER_ACCESS_POINTER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+	pub struct ExclusiveConsumerAccess {
+		_ptr: *mut Cons,
+	}
+
+	unsafe impl Send for ExclusiveConsumerAccess {}
+
+	impl ExclusiveConsumerAccess {
+		unsafe fn new(consumer: &mut Cons) -> Self {
+			use std::sync::atomic::Ordering;
+
+			// Validate that no other access is currently in progress.
+			// Only does this verification on debug builds to let release builds be fast
+			debug_assert_eq!(
+				CONSUMER_ACCESS_POINTER_ACTIVE.load(Ordering::Acquire),
+				false
+			);
+
+			// Mark that access is in progress.
+			#[cfg(debug_assertions)]
+			CONSUMER_ACCESS_POINTER_ACTIVE.store(true, Ordering::Release);
+
+			Self {
+				_ptr: consumer as *mut _,
+			}
+		}
+
+		pub fn fill_frame(&mut self, frame: &mut [f32]) {
+			// SAFETY:
+			//
+			// The invariants established by `create_access()` guarantee
+			// that this pointer is valid and exclusively accessed.
+			let prod = unsafe { &mut (*self._ptr) };
+
+			let n = prod.pop_slice(frame);
+			if n != frame.len() {
+				warn!("Ringbuffer Underflow, filling remaining frame with silence",);
+				debug!("expected {} elements, got {}", frame.len(), n);
+
+				frame[n..].fill(0.0);
+			}
+		}
+	}
+
+	#[cfg(debug_assertions)]
+	impl Drop for ExclusiveConsumerAccess {
+		fn drop(&mut self) {
+			use std::sync::atomic::Ordering;
+
+			tracing::trace!("dropping ConsumerAccess");
+
+			// Mark that access is no longer in progress.
+			CONSUMER_ACCESS_POINTER_ACTIVE.store(false, Ordering::Release);
+		}
+	}
+
+	pub trait UnsafeConsumerExclusiveAccess {
+		/// Creates temporary exclusive access to `consumer`.
+		///
+		/// # Safety
+		///
+		/// The caller must guarantee that:
+		///
+		/// 1. `consumer` remains alive while this access exists.
+		/// 2. No other access to `consumer` occurs while this access exists.
+		unsafe fn unsafe_get_exclusive_access(&mut self) -> ExclusiveConsumerAccess;
+	}
+
+	impl UnsafeConsumerExclusiveAccess for Cons {
+		unsafe fn unsafe_get_exclusive_access(&mut self) -> ExclusiveConsumerAccess {
+			unsafe { ExclusiveConsumerAccess::new(self) }
 		}
 	}
 }

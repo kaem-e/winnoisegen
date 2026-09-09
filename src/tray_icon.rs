@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use tracing::{error, info};
+use tracing::*;
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttributes, TrayIconEvent};
 use windows::{
 	Win32::{
@@ -91,6 +91,8 @@ impl TrayIconSubsystem {
 			..Default::default()
 		})?;
 
+		// let thread_id = crate::MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Acquire);
+
 		// Make Tray Icon Events send out events to the Win32 event loop
 		// SAFETY: blah blah yes this should be wrapped in a `RawWindowHandle` I don't care.
 		// The as `usize` is because this is a `*mut c_void` which can't be sent to a thread safely
@@ -110,10 +112,19 @@ impl TrayIconSubsystem {
 				} => 1,
 				_ => return,
 			};
-			match PostMessageW(Some(HWND(hwnd as _)), EVENTGROUP_TRAYICON, WPARAM(w), LPARAM(0)) {
+			match PostMessageW(
+				Some(HWND(hwnd as _)),
+				EVENTGROUP_TRAYICON,
+				WPARAM(w),
+				LPARAM(0),
+			) {
 				Ok(()) => {},
 				Err(e) => error!("Failed pushing to Win32 Queue: {:#?}", e),
 			};
+			// match PostThreadMessageW(thread_id, EVENTGROUP_TRAYICON, WPARAM(w), LPARAM(0)) {
+			// 	Ok(()) => {},
+			// 	Err(e) => error!("Failed pushing to Win32 Queue: {:#?}", e),
+			// };
 		}));
 
 		// set icon corresponding to current theme
@@ -159,7 +170,7 @@ impl TrayIconSubsystem {
 				Theme::Dark => self.tray_icon.set_icon(Some(self.icon_light.clone()))?,
 			}
 			self.theme = theme;
-			info!("Set Current Theme to: {:#?}", &self.theme);
+			debug!("Set Current Theme to: {:#?}", &self.theme);
 		}
 		Ok(())
 	}
