@@ -296,9 +296,10 @@ fn decoder_thread(mut prod: ringbuf::HeapProd<f32>) {
 mod consumer_access {
 	use crate::audio::Cons;
 	use ringbuf::traits::Consumer as _;
-	use std::sync::atomic::AtomicBool;
 	use tracing::*;
 
+	#[cfg(debug_assertions)]
+	use std::sync::atomic::AtomicBool;
 	#[cfg(debug_assertions)]
 	static CONSUMER_ACCESS_POINTER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -310,11 +311,13 @@ mod consumer_access {
 
 	impl ExclusiveConsumerAccess {
 		unsafe fn new(consumer: &mut Cons) -> Self {
+			#[cfg(debug_assertions)]
 			use std::sync::atomic::Ordering;
 
 			// Validate that no other access is currently in progress.
 			// Only does this verification on debug builds to let release builds be fast
-			debug_assert_eq!(
+			#[cfg(debug_assertions)]
+			assert_eq!(
 				CONSUMER_ACCESS_POINTER_ACTIVE.load(Ordering::Acquire),
 				false
 			);
