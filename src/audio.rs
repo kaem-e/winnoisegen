@@ -41,7 +41,7 @@ impl AudioSubsystem {
 			.default_output_device()
 			.context("Failed to get default output device")?;
 
-		let config = &device
+		let config = device
 			.supported_output_configs()
 			.context("Failed to get default output configs for device")?
 			.find(|c| {
@@ -68,7 +68,7 @@ impl AudioSubsystem {
 		// };
 
 		let stream = device.build_output_stream(
-			&config,
+			config,
 			move |frame: &mut [f32], _| {
 				// write samples from the ringbuf to the buffer slice
 				cons.pop_slice(frame);
