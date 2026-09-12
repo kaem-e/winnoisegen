@@ -1,4 +1,7 @@
-use crate::audio::consumer_access::UnsafeConsumerExclusiveAccess as _;
+use crate::{
+	audio::consumer_access::UnsafeConsumerExclusiveAccess as _,
+	platform::{AppEvent, EventProxy},
+};
 use anyhow::Context as _;
 use cpal::{
 	self, ErrorKind, Host, SampleFormat, Stream,
@@ -10,11 +13,6 @@ use ringbuf::{
 };
 use std::{simd::prelude::*, thread, time::Duration};
 use tracing::*;
-
-/// `msg` range on the windows message type that the tray icon sends its events to
-pub const EVENTGROUP_AUDIO: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
-/// WPARAM value corresponding to a default device switched event
-pub const EVENT_DEFAULT_DEVICE_SWITCHED: usize = 0;
 
 /// Manually enumerated enum representing the current playback state of the audio subsystem
 #[derive(Debug, Clone)]
@@ -35,6 +33,7 @@ type Cons = ringbuf::HeapCons<f32>;
 pub struct AudioSubsystem {
 	consumer: Cons,
 	cpal_stream: Option<StreamState>,
+	proxy: EventProxy,
 }
 
 #[rustfmt::skip]
@@ -42,7 +41,7 @@ static QOA_BINARY_BLOB: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"
 const RINGBUF_CAPACITY: usize = 100_000; // enough for 1 second ≈(2 x 48_000 as stereo interleaved data)
 
 impl AudioSubsystem {
-	pub fn new() -> anyhow::Result<Self> {
+	pub fn new(proxy: EventProxy) -> anyhow::Result<Self> {
 		// create ringbuf to give to both opus decoder thread and audio thread
 		let ringbuffer = HeapRb::<f32>::new(RINGBUF_CAPACITY);
 		let (prod, cons) = ringbuffer.split();
@@ -54,10 +53,14 @@ impl AudioSubsystem {
 			decoder_thread(prod)
 		});
 
-		Ok(Self {
+		let mut temporary = Self {
+			proxy,
 			consumer: cons,
 			cpal_stream: None,
-		})
+		};
+		temporary.regenerate_stream()?;
+
+		Ok(temporary)
 	}
 
 	pub fn regenerate_stream(&mut self) -> anyhow::Result<()> {
@@ -79,6 +82,7 @@ impl AudioSubsystem {
 		// TODO: check if this upholds for other hosts, ive only verified windows
 		drop(self.cpal_stream.take());
 		let mut access = unsafe { self.consumer.unsafe_get_exclusive_access() };
+		let proxy = self.proxy.clone();
 
 		let device = Host::default()
 			.default_output_device()
@@ -103,7 +107,7 @@ impl AudioSubsystem {
 				// write samples from the ringbuf to the buffer slice
 				access.fill_frame(frame);
 			},
-			|e| {
+			move |e| {
 				match e.kind() {
 					// Small errors that can recover/are non-critical so we just continue and issue a warning
 					ErrorKind::Xrun | ErrorKind::RealtimeDenied | ErrorKind::DeviceBusy => {
@@ -117,17 +121,10 @@ impl AudioSubsystem {
 					| ErrorKind::StreamInvalidated
 					| ErrorKind::UnsupportedConfig => {
 						warn!("Stream invalidation error: {e:?}. Posting message to rebuild stream.");
-						let thread_id = crate::MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Acquire);
-
-						use windows::Win32::Foundation::{LPARAM, WPARAM};
-						use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
-
-						match unsafe {
-							PostThreadMessageW(thread_id, EVENTGROUP_AUDIO, WPARAM(0), LPARAM(0))
-						} {
-							Ok(()) => {},
-							Err(e) => error!("Failed pushing to Win32 Queue: {:#?}", e),
-						};
+						proxy
+							.send_event(AppEvent::AudioDeviceSwitched)
+							.context("error sending event to the proxy")
+							.unwrap();
 					},
 
 					// errors that theres no way to recover from so we just exit the application
@@ -204,11 +201,6 @@ impl AudioSubsystem {
 }
 
 /// Function that creates our decoder thread logic. call this in [`std::thread::spawn`]
-///
-/// Example:
-/// ```rust
-/// let handle = thread::spawn(move || decoder_thread(prod));
-/// ```
 fn decoder_thread(mut prod: ringbuf::HeapProd<f32>) {
 	use qoaudio::{QoaDecoder, QoaItem};
 
