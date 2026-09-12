@@ -135,7 +135,10 @@ impl AudioSubsystem {
 					| ErrorKind::UnsupportedOperation
 					| ErrorKind::Other => {
 						error!("Fatal error: {:?}", e);
-						unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(2) }
+						proxy
+							.send_event(AppEvent::QuitApplication)
+							.context("error sending event to the proxy")
+							.unwrap();
 					},
 
 					// Catch all that just exists the app for a yet nonidentified error. we just exit the process outright
