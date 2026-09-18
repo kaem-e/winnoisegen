@@ -22,5 +22,6 @@ export def run-example [] {
 }
 
 export def run-app [] {
+	$env.RUST_LOG = "debug"
 	^cargo run
 }

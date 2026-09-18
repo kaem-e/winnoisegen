@@ -10,6 +10,7 @@ use crate::{
 	tray_icon::TrayIconSubsystem,
 };
 use tracing::*;
+use tracing_subscriber::EnvFilter;
 
 mod audio;
 mod platform;
@@ -18,7 +19,7 @@ mod utils;
 
 fn main() -> anyhow::Result<()> {
 	tracing_subscriber::fmt()
-		.with_max_level(tracing::Level::DEBUG)
+		.with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
 		.init();
 
 	let event_loop = EventLoop::new();
