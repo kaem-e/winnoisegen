@@ -6,6 +6,7 @@ version     = "0.1.0"
 authors     = ["Kaem <kaemviotto@icloud.com>"]
 edition     = "2024"
 description = "Create constant rain noise from the tray"
+build       = "build.rs"
 
 [dependencies]
 anyhow             = "1"
@@ -27,6 +28,9 @@ windows            = {
 
 [dev-dependencies]
 hound = "3.5"
+
+[build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 lto           = "fat"
