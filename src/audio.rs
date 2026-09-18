@@ -31,7 +31,7 @@ type Cons = ringbuf::HeapCons<f32>;
 /// Subsystem that interfaces with the entire audio system.
 /// This is a largely independent system,
 pub struct AudioSubsystem {
-	consumer: Cons,
+	consumer: Box<Cons>,
 	cpal_stream: Option<StreamState>,
 	proxy: EventLoopProxy,
 }
@@ -53,14 +53,14 @@ impl AudioSubsystem {
 			decoder_thread(prod)
 		});
 
-		let mut temporary = Self {
+		let mut audio = Self {
 			proxy,
-			consumer: cons,
+			consumer: Box::new(cons),
 			cpal_stream: None,
 		};
-		temporary.regenerate_stream()?;
+		audio.regenerate_stream()?;
 
-		Ok(temporary)
+		Ok(audio)
 	}
 
 	pub fn regenerate_stream(&mut self) -> anyhow::Result<()> {
@@ -77,6 +77,10 @@ impl AudioSubsystem {
 		// This upholds the invariant for the spsc consumer that only one thread
 		// can access it at a time, thus creating this is always safe after
 		// dropping the cpal stream
+		//
+		// Additionally, the `cons` being a Box<Cons> means that the in-memory
+		// address of the `consumer` is not changed, so any existing
+		// `ConsumerAccess` still points to the same consumer.
 		//
 		// for wasapi: https://github.com/RustAudio/cpal/blob/e1612d5d98152f8dc2a62e1b51ef7cbf4f7f26b7/src/host/wasapi/stream.rs#L479-L495
 		// TODO: check if this upholds for other hosts, ive only verified windows
@@ -364,6 +368,7 @@ mod consumer_access {
 		///
 		/// 1. `consumer` remains alive while this access exists.
 		/// 2. No other access to `consumer` occurs while this access exists.
+		/// 3. The in-memory address of the `consumer` is not changed.
 		unsafe fn unsafe_get_exclusive_access(&mut self) -> ExclusiveConsumerAccess;
 	}
 
