@@ -4,7 +4,7 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconAttribute
 
 use crate::{
 	audio::PlaybackState,
-	platform::{AppEvent, EventProxy, Theme, get_current_theme},
+	platform::{AppEvent, EventLoopProxy, Theme, get_current_theme},
 };
 
 /// Subsystem that controls everything related to the tray icon itself
@@ -25,7 +25,7 @@ impl TrayIconSubsystem {
 	/// Example:
 	/// ```rust
 	/// ```
-	pub fn new(proxy: EventProxy) -> anyhow::Result<Self> {
+	pub fn new(proxy: EventLoopProxy) -> anyhow::Result<Self> {
 		let icon_dark = {
 			let image = image::open(std::path::Path::new(concat!(
 				env!("CARGO_MANIFEST_DIR"),

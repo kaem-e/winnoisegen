@@ -1,6 +1,6 @@
 use crate::{
 	audio::consumer_access::UnsafeConsumerExclusiveAccess as _,
-	platform::{AppEvent, EventProxy},
+	platform::{AppEvent, EventLoopProxy},
 };
 use anyhow::Context as _;
 use cpal::{
@@ -33,7 +33,7 @@ type Cons = ringbuf::HeapCons<f32>;
 pub struct AudioSubsystem {
 	consumer: Cons,
 	cpal_stream: Option<StreamState>,
-	proxy: EventProxy,
+	proxy: EventLoopProxy,
 }
 
 #[rustfmt::skip]
@@ -41,7 +41,7 @@ static QOA_BINARY_BLOB: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"
 const RINGBUF_CAPACITY: usize = 100_000; // enough for 1 second ≈(2 x 48_000 as stereo interleaved data)
 
 impl AudioSubsystem {
-	pub fn new(proxy: EventProxy) -> anyhow::Result<Self> {
+	pub fn new(proxy: EventLoopProxy) -> anyhow::Result<Self> {
 		// create ringbuf to give to both opus decoder thread and audio thread
 		let ringbuffer = HeapRb::<f32>::new(RINGBUF_CAPACITY);
 		let (prod, cons) = ringbuffer.split();

@@ -1,9 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![feature(portable_simd)]
 
-#[cfg(not(target_os = "windows"))]
-compile_error!("This application only supports Windows.");
-
 use crate::{
 	audio::{AudioSubsystem, PlaybackState},
 	platform::{AppEvent, EventLoop, get_current_theme},
@@ -28,11 +25,9 @@ fn main() -> anyhow::Result<()> {
 	let mut audio = AudioSubsystem::new(event_loop.create_event_proxy())?;
 
 	let _span = span!(Level::INFO, "Event Loop");
-	while let Some(result) = event_loop.pump() {
-		let Ok(event) = result else { continue };
-
-		match event {
-			AppEvent::PlaybackToggle => {
+	loop {
+		match event_loop.pump() {
+			Ok(AppEvent::PlaybackToggle) => {
 				info!("Toggling Playback");
 				audio.toggle_playback()?;
 				match audio.get_playback_state()? {
@@ -40,22 +35,24 @@ fn main() -> anyhow::Result<()> {
 					PlaybackState::Paused => tray_icon.set_tooltip("Paused")?,
 				}
 			},
-			AppEvent::AudioDeviceSwitched => {
+			Ok(AppEvent::AudioDeviceSwitched) => {
 				info!("Default device switched, regenerating stream and toggling playback");
 				audio.regenerate_stream()?;
 				audio.toggle_playback()?;
 			},
 
-			AppEvent::SystemThemeChanged => {
+			Ok(AppEvent::SystemThemeChanged) => {
 				let t = get_current_theme()?;
 				info!("System theme changed: {:#?}", t);
 				tray_icon.set_theme(t)?
 			},
 
-			AppEvent::QuitApplication => {
+			Ok(AppEvent::QuitApplication) => {
 				info!("Quit application");
 				break;
 			},
+
+			_ => {},
 		}
 	}
 	drop(_span);
